@@ -1,17 +1,30 @@
 """FastAPI 入口：暴露辩论相关 REST API。"""
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from .db import init_db
 from .debate import DebateService
 from .models import DebateStartRequest, Session
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用启动时初始化数据库表。"""
+    init_db()
+    yield
+
 
 app = FastAPI(
     title="Cyber Foodie Agent",
     description="AI 大厨辩论系统 — 多轮自动辩论，产出结构化战报",
-    version="0.1.0",
+    version="0.2.0",
+    lifespan=lifespan,
 )
+
 
 service = DebateService()
 
