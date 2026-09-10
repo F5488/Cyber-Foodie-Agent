@@ -62,18 +62,24 @@ class SessionStatus(str, Enum):
 # 请求模型
 # ---------------------------------------------------------------------------
 class DebateStartRequest(BaseModel):
-    """启动辩论请求体。"""
+    """启动辩论请求体。
+
+    三个字段均为枚举，天然限制了合法取值；validator 做基础清洗，
+    并额外截断长度，防止超长输入（Prompt 注入/DoS）。
+    """
 
     taste: TastePreference = Field(..., description="口味偏好：辣 / 清淡")
     budget: BudgetLevel = Field(..., description="预算等级：低 / 中 / 高")
     weather: WeatherCondition = Field(..., description="天气：晴 / 雨 / 雪")
+    agent_a_id: Optional[str] = Field(default=None, description="大厨 A 的 agent_id（不传用默认）")
+    agent_b_id: Optional[str] = Field(default=None, description="大厨 B 的 agent_id（不传用默认）")
 
     @field_validator("taste", "budget", "weather", mode="before")
     @classmethod
     def _strip(cls, v: object) -> object:
-        """对输入做基础清洗（去首尾空白），避免注入与非法值。"""
+        """对输入做基础清洗（去首尾空白 + 长度截断），避免注入与非法值。"""
         if isinstance(v, str):
-            v = v.strip()
+            v = v.strip()[:64]
         return v
 
 
@@ -87,7 +93,35 @@ class Agent(BaseModel):
     name: str
     system_prompt: str
     avatar: str = "👨‍🍳"
+    description: str = ""
+    is_preset: bool = False
+    created_by: Optional[str] = None
     created_at: datetime = Field(default_factory=_now_utc)
+
+
+class AgentCreateRequest(BaseModel):
+    """创建自定义 Agent 请求体（US04）。"""
+
+    name: str = Field(..., max_length=50, description="Agent 名称（≤50 字符）")
+    system_prompt: str = Field(..., max_length=2000, description="系统提示词（≤2000 字符）")
+    avatar: str = Field(default="👨‍🍳", max_length=16)
+    description: str = Field(default="", max_length=256)
+
+    @field_validator("name", "system_prompt", "avatar", "description", mode="before")
+    @classmethod
+    def _strip(cls, v: object) -> object:
+        if isinstance(v, str):
+            v = v.strip()[:2000]
+        return v
+
+
+class AgentUpdateRequest(BaseModel):
+    """更新 Agent 请求体（US04），字段可选。"""
+
+    name: Optional[str] = Field(default=None, max_length=50)
+    system_prompt: Optional[str] = Field(default=None, max_length=2000)
+    avatar: Optional[str] = Field(default=None, max_length=16)
+    description: Optional[str] = Field(default=None, max_length=256)
 
 
 class DebateRound(BaseModel):
@@ -116,7 +150,20 @@ class Recommendation(BaseModel):
     reason: str
     pros_cons: ProsCons = Field(default_factory=ProsCons)
     score: float = Field(ge=0.0, le=10.0, description="综合评分 0~10")
+    winner_agent: str = ""
+    menu_item_id: Optional[int] = Field(default=None, description="指向菜单菜品 id（US05）")
+    price: Optional[float] = Field(default=None, description="菜品价格（US05）")
     created_at: datetime = Field(default_factory=_now_utc)
+
+
+class Report(BaseModel):
+    """战报生成器输出契约（US03），含获胜方。"""
+
+    final_choice: str
+    reason: str
+    pros_cons: ProsCons = Field(default_factory=ProsCons)
+    score: float = Field(ge=0.0, le=10.0, description="综合评分 0~10")
+    winner_agent: str
 
 
 class Session(BaseModel):
@@ -135,11 +182,18 @@ class Session(BaseModel):
 
 
 class Menu(BaseModel):
-    """可购买菜品（拓展 US05）。"""
+    """可购买菜品（US05）。"""
 
-    id: int
+    id: int = Field(default=0, description="数据库自增 id（导入时可为 0）")
     name: str
     price: float
     category: str
     tags: list[str] = Field(default_factory=list)
     availability: bool = True
+    source: str = "食堂"
+
+
+class MenuImportRequest(BaseModel):
+    """批量导入菜单请求体（US05）。"""
+
+    items: list[Menu] = Field(..., description="菜品列表（name/price/category/tags/source）")

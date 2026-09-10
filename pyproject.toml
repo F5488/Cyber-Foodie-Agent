@@ -1,3 +1,10 @@
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+    "bdd: BDD 验收测试场景",
+]
+
+[tool.coverage.run]
+# Streamlit 前端为纯 UI 层，不纳入单元测试覆盖率统计
+omit = ["src/frontend.py"]

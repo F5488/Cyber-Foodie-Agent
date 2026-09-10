@@ -192,6 +192,9 @@ erDiagram
         string name
         string system_prompt
         string avatar
+        string description
+        bool is_preset
+        string created_by
         datetime created_at
     }
 
@@ -211,6 +214,9 @@ erDiagram
         string reason
         string pros_cons
         float score
+        string winner_agent
+        int menu_item_id
+        float price
         datetime created_at
     }
 
@@ -221,6 +227,7 @@ erDiagram
         string category
         string tags
         bool availability
+        string source
     }
 ```
 
@@ -228,8 +235,9 @@ erDiagram
 
 - 主键：`SESSIONS.session_id`、`AGENTS.agent_id`、`DEBATE_ROUNDS.id`、`RECOMMENDATIONS.id`、`MENUS.id`。
 - 外键：`DEBATE_ROUNDS.session_id → SESSIONS`、`DEBATE_ROUNDS.speaker_id → AGENTS`、`RECOMMENDATIONS.session_id → SESSIONS`。
-- 建议索引：`SESSIONS(created_at)`、`DEBATE_ROUNDS(session_id, round_number)`、`RECOMMENDATIONS(session_id)`。
-- `SESSION_AGENTS` 为会话-大厨多对多关联表（用于拓展：自定义 Agent 参与辩论）。
+- 建议索引：`SESSIONS(created_at)`、`DEBATE_ROUNDS(session_id, round_number)`、`RECOMMENDATIONS(session_id)`、`MENUS(category)`。
+- `SESSIONS.agent_a_id` / `agent_b_id`（Sprint 3）记录本次辩论使用的大厨。
+- `RECOMMENDATIONS.menu_item_id` / `price`（Sprint 3）指向推荐菜品，与 `MENUS.id` 关联。
 
 ---
 
@@ -303,7 +311,7 @@ stateDiagram-v2
 | `Session` | `session_id`, `taste`, `budget`, `weather`, `status`, `current_round` | 一次辩论会话 |
 | `Agent` | `agent_id`, `name`, `system_prompt`, `avatar` | 辩论参与方 |
 | `DebateRound` | `round_number`, `speaker_id`, `content` | 单条发言 |
-| `Recommendation` | `final_choice`, `reason`, `pros_cons`, `score` | 战报结论 |
+| `Recommendation` | `final_choice`, `reason`, `pros_cons`, `score`, `winner_agent` | 战报结论 |
 | `Menu` | `name`, `price`, `category`, `tags`, `availability` | 可购买菜品（拓展） |
 
 枚举类型：`TastePreference`（辣/清淡）、`BudgetLevel`（低/中/高）、`WeatherCondition`（晴/雨/雪）、`SessionStatus`（上述 5 态）。

@@ -1,33 +1,60 @@
 {
-  "description": "Cyber Foodie Agent 评测数据集：覆盖不同口味/预算/天气组合，用于评估辩论输出的质量与耗时。",
+  "description": "Cyber Foodie Agent 评测数据集：覆盖不同口味/预算/天气/菜单组合，每场景含 input 与 expected 校验规则。",
   "cases": [
     {
       "id": "eval_001",
-      "taste": "辣",
-      "budget": "中",
-      "weather": "晴",
-      "expected": { "final_choice_present": true, "score_range": [0, 10] }
+      "input": { "taste": "辣", "budget": "中", "weather": "晴" },
+      "expected": { "final_choice_present": true, "score_range": [0, 10], "menu_mode": false }
     },
     {
       "id": "eval_002",
-      "taste": "清淡",
-      "budget": "低",
-      "weather": "雨",
-      "expected": { "final_choice_present": true, "score_range": [0, 10] }
+      "input": { "taste": "清淡", "budget": "低", "weather": "雨" },
+      "expected": { "final_choice_present": true, "score_range": [0, 10], "menu_mode": false }
     },
     {
       "id": "eval_003",
-      "taste": "辣",
-      "budget": "高",
-      "weather": "雪",
-      "expected": { "final_choice_present": true, "score_range": [0, 10] }
+      "input": { "taste": "辣", "budget": "高", "weather": "雪" },
+      "expected": { "final_choice_present": true, "score_range": [0, 10], "menu_mode": false }
     },
     {
       "id": "eval_004",
-      "taste": "清淡",
-      "budget": "高",
-      "weather": "晴",
-      "expected": { "final_choice_present": true, "score_range": [0, 10] }
+      "input": { "taste": "清淡", "budget": "高", "weather": "晴" },
+      "expected": { "final_choice_present": true, "score_range": [0, 10], "menu_mode": false }
+    },
+    {
+      "id": "eval_005",
+      "input": { "taste": "辣", "budget": "低", "weather": "晴" },
+      "expected": { "final_choice_present": true, "score_range": [0, 10], "menu_mode": true, "in_candidates": true }
+    },
+    {
+      "id": "eval_006",
+      "input": { "taste": "清淡", "budget": "中", "weather": "雨" },
+      "expected": { "final_choice_present": true, "score_range": [0, 10], "menu_mode": true, "in_candidates": true }
+    },
+    {
+      "id": "eval_007",
+      "input": { "taste": "辣", "budget": "高", "weather": "雪" },
+      "expected": { "final_choice_present": true, "score_range": [0, 10], "menu_mode": true, "in_candidates": true }
+    },
+    {
+      "id": "eval_008",
+      "input": { "taste": "清淡", "budget": "低", "weather": "晴" },
+      "expected": { "final_choice_present": true, "score_range": [0, 10], "menu_mode": true, "in_candidates": true }
+    },
+    {
+      "id": "eval_009",
+      "input": { "taste": "辣", "budget": "中", "weather": "晴", "agent_a_id": "agent-spicy", "agent_b_id": "agent-cantonese" },
+      "expected": { "final_choice_present": true, "score_range": [0, 10], "menu_mode": false, "agents": ["川辣派", "粤式养生派"] }
+    },
+    {
+      "id": "eval_010",
+      "input": { "taste": "清淡", "budget": "中", "weather": "雨" },
+      "expected": { "final_choice_present": true, "score_range": [0, 10], "menu_mode": true, "in_candidates": true, "has_price": true }
+    },
+    {
+      "id": "eval_011",
+      "input": { "taste": "辣", "budget": "低", "weather": "晴" },
+      "expected": { "final_choice_present": true, "score_range": [0, 10], "menu_mode": true, "in_candidates": true, "has_price": true }
     }
   ]
 }

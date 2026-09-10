@@ -27,16 +27,24 @@ jobs:
           pip install flake8
           flake8 src tests --max-line-length=100 --extend-ignore=E203,W503
 
-      - name: 单元测试 + 集成测试（覆盖率）
+      - name: 单元测试 + 集成测试 + BDD 测试（覆盖率）
         run: |
-          pytest tests/unit tests/integration \
+          pytest tests/unit tests/integration tests/bdd \
             --cov=src --cov-report=term-missing \
-            --cov-fail-under=70
+            --cov-fail-under=75
+
+      - name: 数据库迁移验证（Alembic）
+        run: |
+          DATABASE_URL=sqlite:///./ci_migrate.db alembic upgrade head
+
+      - name: 评测脚本（evalset）
+        run: |
+          python eval/run_eval.py --no-serve
 
   docker:
     needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: 构建 Docker 镜像
-        run: docker build -t cyber-foodie-agent:ci .
+      - name: 构建 Docker Compose（后端 + 前端）
+        run: docker compose build

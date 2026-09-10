@@ -53,6 +53,16 @@ class MockLLMClient(LLMClient):
     """Mock 客户端：无需 API Key，按大厨身份返回预设风格发言。"""
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
+        # 战报请求：返回结构化 JSON
+        if "美食裁判" in system_prompt or "结构化战报" in system_prompt:
+            # 若 user_prompt 含候选列表，取第一个候选作为 final_choice
+            choice = self._extract_candidate(user_prompt) or "麻辣香锅"
+            return (
+                f'{{"final_choice": "{choice}", '
+                '"reason": "综合辩论与候选菜品，此方案最契合口味与预算。", '
+                '"pros_cons": {"pros": ["口味契合、价格合理"], "cons": ["口味单一"]}, '
+                '"score": 8.5, "winner_agent": "川辣派"}'
+            )
         name = "大厨"
         if "川辣派" in system_prompt:
             name = "川辣派"
@@ -76,6 +86,14 @@ class MockLLMClient(LLMClient):
             if w in user_prompt:
                 return w
         return "今天"
+
+    @staticmethod
+    def _extract_candidate(user_prompt: str) -> str:
+        """从候选列表文本中提取第一个菜品名（格式：id=N 名称=XX 价格=...）。"""
+        import re
+
+        m = re.search(r"名称=([^\s]+)", user_prompt)
+        return m.group(1) if m else ""
 
     @staticmethod
     def _extract_budget(user_prompt: str) -> str:

@@ -14,13 +14,22 @@ CANTONESE_SYSTEM_PROMPT = """你是「粤式养生派」大厨，性格温和理
 
 
 def build_default_agents() -> list[Agent]:
-    """构建两组预设大厨。"""
+    """构建两组预设大厨（is_preset=True，不可删除）。"""
     return [
-        Agent(agent_id="agent-spicy", name="川辣派", system_prompt=SPICY_SYSTEM_PROMPT, avatar="🌶️"),
+        Agent(
+            agent_id="agent-spicy",
+            name="川辣派",
+            system_prompt=SPICY_SYSTEM_PROMPT,
+            avatar="🌶️",
+            description="无辣不欢的川菜大厨",
+            is_preset=True,
+        ),
         Agent(
             agent_id="agent-cantonese",
             name="粤式养生派",
             system_prompt=CANTONESE_SYSTEM_PROMPT,
             avatar="🥣",
+            description="讲究本味与养生的粤菜大厨",
+            is_preset=True,
         ),
     ]

@@ -19,6 +19,12 @@ env/
 *.db
 *.sqlite
 *.sqlite3
+cyber_foodie.db
+alembic_tmp.db
+
+# 评测产物
+eval/report.json
+eval/report.md
 
 # 测试与覆盖率
 .pytest_cache/
