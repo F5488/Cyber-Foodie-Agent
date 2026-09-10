@@ -10,8 +10,8 @@ import os
 import httpx
 import streamlit as st
 
-# 后端地址：默认本地，Docker 内通过环境变量指向 backend 服务
-API_BASE = os.getenv("API_BASE", "http://localhost:8000")
+# 后端地址：默认用 127.0.0.1（避免 localhost 被系统代理拦截），Docker 内通过环境变量指向 backend 服务
+API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8000")
 
 st.set_page_config(page_title="Cyber Foodie Agent", page_icon="🍜", layout="wide")
 
@@ -300,11 +300,25 @@ def render_menu_page() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 侧边栏导航 + 历史会话
+# 侧边栏导航 + 历史会话 + 连接测试
 # ---------------------------------------------------------------------------
 with st.sidebar:
     st.title("🍜 Cyber Foodie")
     page = st.radio("导航", ["💬 辩论", "🧑‍🍳 Agent 管理", "🍽️ 菜单管理"])
+
+    st.divider()
+    if st.button("🔧 测试后端连接", use_container_width=True):
+        import time
+
+        url = f"{API_BASE}/health"
+        start = time.time()
+        try:
+            resp = httpx.get(url, timeout=5.0)
+            elapsed = (time.time() - start) * 1000
+            st.success(f"✅ 后端可达\n\nURL：{url}\n状态码：{resp.status_code}\n耗时：{elapsed:.1f} ms")
+        except httpx.HTTPError as exc:
+            elapsed = (time.time() - start) * 1000
+            st.error(f"❌ 连接失败\n\nURL：{url}\n异常：{type(exc).__name__}\n耗时：{elapsed:.1f} ms")
 
     st.divider()
     st.header("📚 历史会话")
