@@ -42,5 +42,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: 构建 Docker 镜像
-        run: docker build -t cyber-foodie-agent:ci .
+      - name: 构建 Docker Compose（后端 + 前端）
+        run: docker compose build

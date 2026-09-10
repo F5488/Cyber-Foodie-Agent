@@ -5,11 +5,13 @@
 from __future__ import annotations
 
 import json
+import os
 
 import httpx
 import streamlit as st
 
-API_BASE = "http://localhost:8000"
+# 后端地址：默认本地，Docker 内通过环境变量指向 backend 服务
+API_BASE = os.getenv("API_BASE", "http://localhost:8000")
 
 st.set_page_config(page_title="Cyber Foodie Agent", page_icon="🍜", layout="wide")
 
