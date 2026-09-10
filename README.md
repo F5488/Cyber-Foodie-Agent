@@ -193,7 +193,7 @@ pytest tests/unit tests/integration tests/bdd --cov=src --cov-report=term-missin
 
 | 成员 | 职责 | GitHub |
 | --- | --- | --- |
-| 张琪 | 项目负责人 / 后端 | [F5488](https://github.com/F5488) |
+| 符鹏 | 项目负责人 / 后端 | [F5488](https://github.com/F5488) |
 
 <!-- 组员按需补充 -->
 
