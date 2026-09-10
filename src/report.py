@@ -14,7 +14,7 @@ import re
 from typing import Optional
 
 from .llm import LLMClient, LLMError
-from .models import DebateRound, ProsCons, Report
+from .models import DebateRound, Menu, ProsCons, Report
 
 _REPORT_SYSTEM_PROMPT = """你是一位美食裁判，需要根据两位大厨的辩论发言，输出一份结构化战报。
 严格只返回 JSON，不要输出任何额外文字。JSON 结构如下：
@@ -26,6 +26,15 @@ _REPORT_SYSTEM_PROMPT = """你是一位美食裁判，需要根据两位大厨�
   "winner_agent": "川辣派 或 粤式养生派"
 }
 score 为 0~10 的数值，保留一位小数。winner_agent 必须从两位大厨名字中二选一。"""
+
+
+def _build_candidates_text(candidates: list[Menu]) -> str:
+    """将候选菜品列表拼装为供 LLM 选择的文本。"""
+    lines = []
+    for m in candidates:
+        tags = "/".join(m.tags) if m.tags else "无标签"
+        lines.append(f"- id={m.id} 名称={m.name} 价格={m.price}元 分类={m.category} 标签={tags}")
+    return "\n".join(lines)
 
 
 def _extract_json(text: str) -> Optional[dict]:
@@ -50,17 +59,22 @@ def _extract_json(text: str) -> Optional[dict]:
     return None
 
 
-def _build_fallback_report(rounds: list[DebateRound]) -> Report:
+def _build_fallback_report(
+    rounds: list[DebateRound], candidates: Optional[list[Menu]] = None
+) -> Report:
     """规则降级：基于发言的关键词与发言顺序构造战报。
 
-    - 若发言中出现「推荐」，则取第一个被推荐菜品名。
-    - 否则按发言人划分正反观点。
+    - 若提供候选菜单，则优先从候选中取第一个作为 final_choice。
+    - 否则若发言中出现「推荐」，取第一个被推荐菜品名。
     - 获胜方取发言更多的 Agent。
     """
     pros: list[str] = []
     cons: list[str] = []
     final_choice = "家常小炒"
     reason = "根据两位大厨的辩论综合权衡，为您推荐家常小炒，荤素搭配、口味适中。"
+
+    if candidates:
+        final_choice = candidates[0].name
 
     by_speaker: dict[str, list[str]] = {}
     for r in rounds:
@@ -89,13 +103,30 @@ def _build_fallback_report(rounds: list[DebateRound]) -> Report:
     )
 
 
-def generate_report(llm: LLMClient, rounds: list[DebateRound]) -> Report:
-    """调用 LLM 生成战报；失败重试一次，仍失败则规则降级。"""
+def generate_report(
+    llm: LLMClient,
+    rounds: list[DebateRound],
+    candidates: Optional[list[Menu]] = None,
+) -> Report:
+    """调用 LLM 生成战报；失败重试一次，仍失败则规则降级。
+
+    若提供候选菜单（US05），要求 final_choice 必须来自候选列表。
+    """
     if not rounds:
-        return _build_fallback_report(rounds)
+        return _build_fallback_report(rounds, candidates)
 
     transcript = "\n".join(f"{r.speaker_name}：{r.content}" for r in rounds)
-    user_prompt = f"以下是辩论完整记录：\n\n{transcript}\n\n请输出战报 JSON。"
+
+    if candidates:
+        user_prompt = (
+            "以下是辩论完整记录：\n\n"
+            f"{transcript}\n\n"
+            "以下是可选择的候选菜品（final_choice 必须从中选取，且只能选一个）：\n"
+            f"{_build_candidates_text(candidates)}\n\n"
+            "请输出战报 JSON。"
+        )
+    else:
+        user_prompt = f"以下是辩论完整记录：\n\n{transcript}\n\n请输出战报 JSON。"
 
     for attempt in range(2):  # 原始 + 重试 1 次
         try:
@@ -109,4 +140,4 @@ def generate_report(llm: LLMClient, rounds: list[DebateRound]) -> Report:
             continue
 
     # 兜底降级
-    return _build_fallback_report(rounds)
+    return _build_fallback_report(rounds, candidates)

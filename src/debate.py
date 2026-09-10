@@ -18,6 +18,7 @@ from .models import (
     BudgetLevel,
     DebateRound,
     DebateStartRequest,
+    Menu,
     ProsCons,
     Recommendation,
     Session,
@@ -25,7 +26,14 @@ from .models import (
     TastePreference,
     WeatherCondition,
 )
-from .orm_models import AgentModel, DebateRoundModel, RecommendationModel, SessionModel
+from .menu_service import MenuService
+from .orm_models import (
+    AgentModel,
+    DebateRoundModel,
+    MenuModel,
+    RecommendationModel,
+    SessionModel,
+)
 from .report import generate_report
 
 # 允许的轮次上限，防御异常输入
@@ -132,6 +140,8 @@ class DebateService:
                 pros_cons=ProsCons(pros=rec.pros or [], cons=rec.cons or []),
                 score=rec.score,
                 winner_agent=rec.winner_agent,
+                menu_item_id=rec.menu_item_id,
+                price=rec.price,
                 created_at=rec.created_at,
             )
 
@@ -207,8 +217,12 @@ class DebateService:
         session.current_round = self._rounds
         session.status = SessionStatus.SUCCESS.value
 
-        # 辩论结束，生成结构化战报并持久化（US03）
-        report = generate_report(self._llm, pydantic_rounds)
+        # 辩论结束，生成结构化战报并持久化（US03 + US05）
+        # 若菜单表非空，先用预算+口味筛选候选，供 LLM 从中定夺
+        candidates = self._load_candidates(dbs, req)
+        report = generate_report(self._llm, pydantic_rounds, candidates)
+
+        menu_item = self._match_menu_item(report.final_choice, candidates)
         dbs.add(
             RecommendationModel(
                 session_id=session.session_id,
@@ -218,8 +232,37 @@ class DebateService:
                 cons=report.pros_cons.cons,
                 score=report.score,
                 winner_agent=report.winner_agent,
+                menu_item_id=menu_item.id if menu_item else None,
+                price=menu_item.price if menu_item else None,
             )
         )
+
+    def _load_candidates(self, dbs: DbSession, req: DebateStartRequest) -> list[Menu]:
+        """从菜单表筛选候选菜品（预算 + 口味标签），菜单为空返回空列表。"""
+        rows = dbs.query(MenuModel).filter(MenuModel.availability == 1).all()
+        if not rows:
+            return []
+        menus = [
+            Menu(
+                id=m.id,
+                name=m.name,
+                price=m.price,
+                category=m.category,
+                tags=m.tags or [],
+                availability=bool(m.availability),
+                source=m.source,
+            )
+            for m in rows
+        ]
+        return MenuService.filter_candidates_by_rules(menus, req.taste.value, req.budget.value)
+
+    @staticmethod
+    def _match_menu_item(final_choice: str, candidates: list[Menu]) -> Optional[Menu]:
+        """按名称匹配候选中的菜品，返回对应 Menu（含 id/price）。"""
+        for m in candidates:
+            if m.name == final_choice or m.name in final_choice or final_choice in m.name:
+                return m
+        return None
 
     # ------------------------------------------------------------------
     # 内部：ORM <-> Pydantic 转换
@@ -271,6 +314,8 @@ class DebateService:
                 pros_cons=ProsCons(pros=rec.pros or [], cons=rec.cons or []),
                 score=rec.score,
                 winner_agent=rec.winner_agent,
+                menu_item_id=rec.menu_item_id,
+                price=rec.price,
                 created_at=rec.created_at,
             )
 
