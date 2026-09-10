@@ -20,31 +20,31 @@ BUDGET_OPTIONS = ["低", "中", "高"]
 WEATHER_OPTIONS = ["晴", "雨", "雪"]
 
 
-def _get(path: str):
+def _get(path: str, params: dict | None = None):
     try:
-        return httpx.get(f"{API_BASE}{path}", timeout=15.0)
-    except httpx.ConnectError:
+        return httpx.get(f"{API_BASE}{path}", params=params, timeout=15.0)
+    except httpx.HTTPError:
         return None
 
 
 def _post(path: str, json_body: dict | None = None, timeout: float = 60.0):
     try:
         return httpx.post(f"{API_BASE}{path}", json=json_body, timeout=timeout)
-    except httpx.ConnectError:
+    except httpx.HTTPError:
         return None
 
 
 def _put(path: str, json_body: dict):
     try:
         return httpx.put(f"{API_BASE}{path}", json=json_body, timeout=15.0)
-    except httpx.ConnectError:
+    except httpx.HTTPError:
         return None
 
 
 def _delete(path: str):
     try:
         return httpx.delete(f"{API_BASE}{path}", timeout=15.0)
-    except httpx.ConnectError:
+    except httpx.HTTPError:
         return None
 
 
@@ -229,15 +229,23 @@ def render_menu_page() -> None:
         submitted = st.form_submit_button("导入", use_container_width=True)
     if submitted and uploaded is not None:
         try:
-            data = json.load(uploaded)
+            # 明确读取字节并解析 JSON（对齐后端 {"items": [...]} 结构）
+            raw = uploaded.getvalue()
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            st.error(f"JSON 格式错误：{exc}")
+        else:
+            # 兼容两种结构：顶层 {"items": [...]} 或直接数组 [...]
+            if isinstance(data, list):
+                data = {"items": data}
             resp = _post("/api/menus/import", data, timeout=30.0)
-            if resp and resp.status_code == 201:
-                st.success(f"成功导入 {len(resp.json())} 道菜")
+            if resp is None:
+                st.error("连接后端失败：请确认 uvicorn 已启动")
+            elif resp.status_code == 201:
+                st.success(f"已导入 {len(resp.json())} 道菜")
                 st.rerun()
-            elif resp:
-                st.error(resp.text)
-        except json.JSONDecodeError:
-            st.error("JSON 格式错误")
+            else:
+                st.error(f"后端返回 {resp.status_code}：{resp.text}")
     elif submitted:
         st.warning("请先上传 JSON 文件（可参考 eval/sample_menu.json）")
 
@@ -258,33 +266,37 @@ def render_menu_page() -> None:
         params["max_price"] = max_price
 
     resp = _get("/api/menus")
-    if resp and resp.status_code == 200:
-        menus = resp.json()
-        # 客户端二次过滤（简单处理，也可用后端参数）
-        if params:
-            resp2 = httpx.get(f"{API_BASE}/api/menus", params=params, timeout=15.0)
-            if resp2.status_code == 200:
-                menus = resp2.json()
+    if resp is None:
+        st.error("连接后端失败：请确认 uvicorn 已启动")
+        return
+    if resp.status_code != 200:
+        st.error(f"后端返回 {resp.status_code}：{resp.text}")
+        return
 
-        if menus:
-            st.dataframe(
-                [
-                    {
-                        "ID": m["id"],
-                        "名称": m["name"],
-                        "价格": m["price"],
-                        "分类": m["category"],
-                        "标签": "/".join(m.get("tags", [])),
-                        "来源": m.get("source", "食堂"),
-                    }
-                    for m in menus
-                ],
-                use_container_width=True,
-            )
-        else:
-            st.info("暂无菜单数据，请先导入")
+    menus = resp.json()
+    # 服务端过滤
+    if params:
+        resp2 = _get("/api/menus", params=params)
+        if resp2 is not None and resp2.status_code == 200:
+            menus = resp2.json()
+
+    if menus:
+        st.dataframe(
+            [
+                {
+                    "ID": m["id"],
+                    "名称": m["name"],
+                    "价格": m["price"],
+                    "分类": m["category"],
+                    "标签": "/".join(m.get("tags", [])),
+                    "来源": m.get("source", "食堂"),
+                }
+                for m in menus
+            ],
+            use_container_width=True,
+        )
     else:
-        st.info("无法连接后端或暂无菜单")
+        st.info("菜单为空，已尝试自动导入，请刷新页面")
 
 
 # ---------------------------------------------------------------------------

@@ -4,7 +4,10 @@
 因为 slowapi 的 @limiter.limit 装饰器会替换函数对象，导致字符串注解
 无法在 FastAPI 中解析。
 """
+import json
+import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -31,14 +34,39 @@ from .models import (
     Session,
 )
 
+logger = logging.getLogger("uvicorn.error")
+
 # slowapi 频控：按客户端 IP 识别
 limiter = Limiter(key_func=get_remote_address)
 
 
+def _auto_import_sample_menu() -> None:
+    """若菜单表为空，自动导入 eval/sample_menu.json（兜底，保证开箱可用）。"""
+    svc = MenuService()
+    if svc.list_menus():
+        return  # 已有菜单，跳过
+
+    sample = Path(__file__).resolve().parent.parent / "eval" / "sample_menu.json"
+    if not sample.exists():
+        logger.warning("未找到示例菜单文件 %s，跳过自动导入", sample)
+        return
+
+    try:
+        data = json.loads(sample.read_text(encoding="utf-8"))
+        items = [Menu(**item) for item in data.get("items", [])]
+        if not items:
+            return
+        svc.import_menus(MenuImportRequest(items=items))
+        logger.info("自动导入 %d 道菜", len(items))
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        logger.warning("自动导入示例菜单失败：%s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用启动时初始化数据库表。"""
+    """应用启动时初始化数据库表，并自动导入示例菜单（若为空）。"""
     init_db()
+    _auto_import_sample_menu()
     yield
 
 
