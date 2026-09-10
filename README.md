@@ -12,7 +12,7 @@ AI 大厨辩论系统：输入口味、预算与天气，两位 AI 大厨（「�
 
 - ✅ **US01 启动自动辩论** — 输入口味（辣/清淡）、预算（低/中/高）、天气（晴/雨/雪），系统触发两位大厨辩论
 - ✅ **US02 实时查看辩论过程** — 聊天式展示两位大厨的轮流发言
-- 🚧 **US03 生成结构化战报** — 最终推荐、理由、双方观点、评分（Sprint 2）
+- ✅ **US03 生成结构化战报** — 最终推荐、理由、双方观点、评分、获胜方
 - 🚧 **US04 自定义 Agent 性格** — 创建/修改系统提示词（Sprint 3）
 - 🚧 **US05 结合真实菜单数据** — 基于可购买菜品推荐（Sprint 3）
 
@@ -79,15 +79,52 @@ docker compose up --build
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `POST` | `/api/debate/start` | 启动辩论（US01） |
+| `POST` | `/api/debate/start` | 启动辩论（US01，限每 IP 5 次/分钟） |
 | `GET` | `/api/debate/{session_id}/status` | 查询会话与发言（US02） |
 | `GET` | `/api/debate/{session_id}/rounds` | 按轮次返回发言（US02） |
+| `GET` | `/api/debate/{session_id}/report` | 返回结构化战报（US03） |
+| `GET` | `/api/debate/sessions` | 返回全部历史会话 |
 | `GET` | `/health` | 健康检查 |
+
+### curl 调用示例
+
+```bash
+# 1. 启动辩论
+curl -X POST http://localhost:8000/api/debate/start \
+  -H "Content-Type: application/json" \
+  -d '{"taste":"辣","budget":"中","weather":"晴"}'
+
+# 返回体含 session_id，例如 "a1b2c3..."
+
+# 2. 查询战报
+curl http://localhost:8000/api/debate/a1b2c3.../report
+```
+
+战报响应示例：
+
+```json
+{
+  "final_choice": "麻辣香锅",
+  "reason": "天气偏热且用户喜辣，川辣派方案更契合口味。",
+  "pros_cons": {"pros": ["口味刺激"], "cons": ["偏油腻"]},
+  "score": 8.5,
+  "winner_agent": "川辣派",
+  "created_at": "2026-09-10T09:37:57"
+}
+```
+
+## 数据库
+
+- **开发**：SQLite（文件 `cyber_foodie.db`，已加入 `.gitignore`）
+- **生产**：PostgreSQL（通过 `DATABASE_URL` 切换）
+- 表结构对应 `docs/system_design.md` 的 ER 图：`sessions`、`agents`、`debate_rounds`、`recommendations`
+- Sprint 2 使用 SQLAlchemy `create_all` 建表，Sprint 3 引入 Alembic 迁移
 
 ## 测试
 
 ```bash
-pytest tests/unit tests/integration --cov=src --cov-report=term-missing
+# 全部测试（单元 + 集成 + BDD）
+pytest tests/unit tests/integration tests/bdd --cov=src --cov-report=term-missing
 ```
 
 ## 项目结构

@@ -303,7 +303,7 @@ stateDiagram-v2
 | `Session` | `session_id`, `taste`, `budget`, `weather`, `status`, `current_round` | 一次辩论会话 |
 | `Agent` | `agent_id`, `name`, `system_prompt`, `avatar` | 辩论参与方 |
 | `DebateRound` | `round_number`, `speaker_id`, `content` | 单条发言 |
-| `Recommendation` | `final_choice`, `reason`, `pros_cons`, `score` | 战报结论 |
+| `Recommendation` | `final_choice`, `reason`, `pros_cons`, `score`, `winner_agent` | 战报结论 |
 | `Menu` | `name`, `price`, `category`, `tags`, `availability` | 可购买菜品（拓展） |
 
 枚举类型：`TastePreference`（辣/清淡）、`BudgetLevel`（低/中/高）、`WeatherCondition`（晴/雨/雪）、`SessionStatus`（上述 5 态）。
