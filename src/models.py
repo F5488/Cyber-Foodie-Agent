@@ -151,6 +151,8 @@ class Recommendation(BaseModel):
     pros_cons: ProsCons = Field(default_factory=ProsCons)
     score: float = Field(ge=0.0, le=10.0, description="综合评分 0~10")
     winner_agent: str = ""
+    menu_item_id: Optional[int] = Field(default=None, description="指向菜单菜品 id（US05）")
+    price: Optional[float] = Field(default=None, description="菜品价格（US05）")
     created_at: datetime = Field(default_factory=_now_utc)
 
 
@@ -180,11 +182,18 @@ class Session(BaseModel):
 
 
 class Menu(BaseModel):
-    """可购买菜品（拓展 US05）。"""
+    """可购买菜品（US05）。"""
 
-    id: int
+    id: int = Field(default=0, description="数据库自增 id（导入时可为 0）")
     name: str
     price: float
     category: str
     tags: list[str] = Field(default_factory=list)
     availability: bool = True
+    source: str = "食堂"
+
+
+class MenuImportRequest(BaseModel):
+    """批量导入菜单请求体（US05）。"""
+
+    items: list[Menu] = Field(..., description="菜品列表（name/price/category/tags/source）")

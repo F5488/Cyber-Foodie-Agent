@@ -20,11 +20,14 @@ from .agent_service import (
 )
 from .db import init_db
 from .debate import DebateService
+from .menu_service import MenuService
 from .models import (
     Agent,
     AgentCreateRequest,
     AgentUpdateRequest,
     DebateStartRequest,
+    Menu,
+    MenuImportRequest,
     Session,
 )
 
@@ -53,6 +56,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 service = DebateService()
 agent_service = AgentService()
+menu_service = MenuService()
 
 
 @app.get("/health")
@@ -155,6 +159,25 @@ def get_report(session_id: str) -> dict:
 def list_sessions() -> list[Session]:
     """返回全部历史会话（按创建时间倒序）。"""
     return service.list_sessions()
+
+
+# ---------------------------------------------------------------------------
+# 菜单管理（US05）
+# ---------------------------------------------------------------------------
+@app.post("/api/menus/import", response_model=list[Menu], status_code=201)
+def import_menus(req: MenuImportRequest) -> list[Menu]:
+    """批量导入菜品。"""
+    return menu_service.import_menus(req)
+
+
+@app.get("/api/menus", response_model=list[Menu])
+def list_menus(
+    category: str | None = None,
+    min_price: float | None = None,
+    max_price: float | None = None,
+) -> list[Menu]:
+    """列出菜单，支持按分类与价格区间过滤。"""
+    return menu_service.list_menus(category=category, min_price=min_price, max_price=max_price)
 
 
 @app.exception_handler(Exception)

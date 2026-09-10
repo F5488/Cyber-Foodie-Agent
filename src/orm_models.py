@@ -88,6 +88,23 @@ class RecommendationModel(Base):
     cons = Column(JSON, nullable=False, default=list)
     score = Column(Float, nullable=False)
     winner_agent = Column(String(64), nullable=False)
+    menu_item_id = Column(Integer, nullable=True)  # Sprint 3：指向 menus.id
+    price = Column(Float, nullable=True)  # Sprint 3：菜品价格
     created_at = Column(DateTime, nullable=False, default=_now_utc)
 
     session = relationship("SessionModel", back_populates="recommendation")
+
+
+class MenuModel(Base):
+    """菜单表（US05）：食堂/外卖可购买菜品。"""
+
+    __tablename__ = "menus"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(128), nullable=False)
+    price = Column(Float, nullable=False)
+    category = Column(String(32), nullable=False, index=True)
+    tags = Column(JSON, nullable=False, default=list)  # 口味标签，如 ["辣","川菜"]
+    availability = Column(Integer, nullable=False, default=1)  # 1=可购买
+    source = Column(String(32), nullable=False, default="食堂")  # 食堂 / 外卖
+    created_at = Column(DateTime, nullable=False, default=_now_utc)

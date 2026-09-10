@@ -1,0 +1,25 @@
+{
+  "items": [
+    {"name": "麻辣香锅", "price": 28.0, "category": "川菜", "tags": ["辣", "麻辣", "川"], "source": "食堂"},
+    {"name": "水煮鱼", "price": 32.0, "category": "川菜", "tags": ["辣", "麻辣", "川", "鱼"], "source": "食堂"},
+    {"name": "宫保鸡丁", "price": 22.0, "category": "川菜", "tags": ["辣", "香辣", "川", "鸡"], "source": "食堂"},
+    {"name": "麻婆豆腐", "price": 14.0, "category": "川菜", "tags": ["辣", "麻辣", "川", "豆腐"], "source": "食堂"},
+    {"name": "回锅肉", "price": 24.0, "category": "川菜", "tags": ["辣", "川", "猪肉"], "source": "食堂"},
+    {"name": "干锅花菜", "price": 16.0, "category": "川菜", "tags": ["辣", "干锅", "川", "素"], "source": "食堂"},
+    {"name": "辣子鸡", "price": 26.0, "category": "川菜", "tags": ["辣", "香辣", "川", "鸡"], "source": "外卖"},
+    {"name": "白切鸡", "price": 20.0, "category": "粤菜", "tags": ["清淡", "粤", "白切", "鸡"], "source": "食堂"},
+    {"name": "清蒸鲈鱼", "price": 38.0, "category": "粤菜", "tags": ["清淡", "粤", "蒸", "鱼"], "source": "食堂"},
+    {"name": "老火靓汤", "price": 12.0, "category": "粤菜", "tags": ["清淡", "粤", "汤", "养生"], "source": "食堂"},
+    {"name": "白灼菜心", "price": 10.0, "category": "粤菜", "tags": ["清淡", "粤", "素", "养生"], "source": "食堂"},
+    {"name": "豉汁蒸排骨", "price": 25.0, "category": "粤菜", "tags": ["清淡", "粤", "蒸", "排骨"], "source": "食堂"},
+    {"name": "鲜虾肠粉", "price": 18.0, "category": "粤菜", "tags": ["清淡", "粤", "虾"], "source": "外卖"},
+    {"name": "香菇炖鸡", "price": 22.0, "category": "粤菜", "tags": ["清淡", "炖", "养生", "鸡"], "source": "食堂"},
+    {"name": "扬州炒饭", "price": 15.0, "category": "主食", "tags": ["清淡", "炒饭", "米饭"], "source": "食堂"},
+    {"name": "番茄鸡蛋面", "price": 12.0, "category": "主食", "tags": ["清淡", "面", "素"], "source": "食堂"},
+    {"name": "牛肉拉面", "price": 18.0, "category": "主食", "tags": ["面", "牛肉"], "source": "食堂"},
+    {"name": "寿司拼盘", "price": 30.0, "category": "日式", "tags": ["清淡", "日式", "海鲜"], "source": "外卖"},
+    {"name": "照烧鸡排饭", "price": 21.0, "category": "日式", "tags": ["日式", "鸡", "米饭"], "source": "外卖"},
+    {"name": "韩式泡菜汤", "price": 19.0, "category": "韩式", "tags": ["辣", "韩式", "汤"], "source": "外卖"},
+    {"name": "石锅拌饭", "price": 22.0, "category": "韩式", "tags": ["韩式", "米饭"], "source": "外卖"}
+  ]
+}
