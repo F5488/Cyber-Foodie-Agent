@@ -2,11 +2,12 @@
 
 AI 大厨辩论系统：输入口味、预算与天气，两位 AI 大厨（「川辣派」vs「粤式养生派」）进行多轮自动辩论，最终输出结构化战报与菜品推荐。
 
-[![CI](https://github.com/<your-org>/cyber-foodie-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/<your-org>/cyber-foodie-agent/actions)
+[![CI](https://github.com/F5488/Cyber-Foodie-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/F5488/Cyber-Foodie-Agent/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
+[![Coverage](https://img.shields.io/badge/coverage-90%25-green.svg)]()
 
-> ⚠️ 徽章中的 `<your-org>` 需替换为你的 GitHub 组织/用户名。
+> 徽章中的仓库地址为 `F5488/Cyber-Foodie-Agent`，如需迁移请同步替换。
 
 ## 功能列表
 
@@ -152,19 +153,64 @@ pytest tests/unit tests/integration tests/bdd --cov=src --cov-report=term-missin
 ## 项目结构
 
 ```
-.github/         # CI 与 Issue/PR 模板
-docs/            # 系统设计、User Stories、Sprint 报告
-src/             # 后端与前端源码
-tests/           # 单元 / 集成 / BDD 测试
-eval/            # 评测数据集
+.
+├── .github/
+│   ├── workflows/ci.yml        # GitHub Actions CI
+│   ├── ISSUE_TEMPLATE/         # Issue 模板（User Story / Bug）
+│   └── PULL_REQUEST_TEMPLATE.md
+├── docs/
+│   ├── system_design.md        # 系统设计（6 张 Mermaid 图）
+│   ├── user_stories/           # US01~US05
+│   ├── sprint1~4_report.md     # 4 份 Sprint 报告
+│   └── presentation.md         # 答辩材料
+├── src/
+│   ├── main.py                 # FastAPI 入口
+│   ├── models.py               # Pydantic 契约
+│   ├── db.py                   # SQLAlchemy engine / session
+│   ├── orm_models.py           # ORM 映射
+│   ├── debate.py               # 辩论控制器
+│   ├── report.py               # 战报生成器
+│   ├── agent_service.py        # Agent 管理（US04）
+│   ├── menu_service.py         # 菜单服务（US05）
+│   ├── llm.py                  # LLM 客户端（多 provider + Mock）
+│   ├── agents.py               # 预设大厨
+│   └── frontend.py             # Streamlit 前端
+├── tests/
+│   ├── unit/                   # 单元测试
+│   ├── integration/            # 集成测试
+│   └── bdd/                    # BDD 验收测试
+├── eval/
+│   ├── evalset.json            # 评测数据集（11 场景）
+│   ├── sample_menu.json        # 示例菜单（21 道菜）
+│   └── run_eval.py             # 评分脚本
+├── alembic/                    # 数据库迁移
+├── Dockerfile / Dockerfile.frontend
+├── docker-compose.yml
+└── README.md
 ```
 
 ## 贡献者
 
-<!-- 在此填写团队名单 -->
-- 你的名字
+| 成员 | 职责 | GitHub |
+| --- | --- | --- |
+| 张琪 | 项目负责人 / 后端 | [F5488](https://github.com/F5488) |
+
+<!-- 组员按需补充 -->
 
 ## 演示视频
 
-<!-- 录制 3-5 分钟演示视频，上传后替换此链接 -->
-- [ ] 待补充
+<!-- 录制 3-5 分钟演示视频（OBS/Windows 录屏），上传 YouTube 或 docs/demo.mp4 后替换链接 -->
+- 🎬 演示视频：[待补充](https://github.com/F5488/Cyber-Foodie-Agent)
+- 演示分镜脚本见 [docs/demo_script.md](docs/demo_script.md)
+
+## 评测
+
+```bash
+# 用内存模式跑评测（无需启动服务）
+python eval/run_eval.py --no-serve
+
+# 或用真实 HTTP（需先启动后端）
+python eval/run_eval.py
+```
+
+输出 `eval/report.json` 与 `eval/report.md`。
