@@ -19,6 +19,7 @@ env/
 *.db
 *.sqlite
 *.sqlite3
+cyber_foodie.db
 
 # 测试与覆盖率
 .pytest_cache/
