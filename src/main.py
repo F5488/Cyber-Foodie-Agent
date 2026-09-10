@@ -93,6 +93,12 @@ def get_report(session_id: str) -> dict:
     return report.model_dump(mode="json")
 
 
+@app.get("/api/debate/sessions")
+def list_sessions() -> list[Session]:
+    """返回全部历史会话（按创建时间倒序）。"""
+    return service.list_sessions()
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(
     request: Request, exc: Exception
