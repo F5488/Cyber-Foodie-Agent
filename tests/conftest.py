@@ -24,6 +24,16 @@ def db_engine():
     Base.metadata.drop_all(bind=engine)
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """每个测试前重置 slowapi 频控，避免跨测试累积触发 429。"""
+    from src.main import limiter
+
+    limiter.reset()
+    yield
+    limiter.reset()
+
+
 @pytest.fixture()
 def client(db_engine):
     """基于内存数据库的 TestClient，真实走 API 全链路。"""

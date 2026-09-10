@@ -62,7 +62,11 @@ class SessionStatus(str, Enum):
 # 请求模型
 # ---------------------------------------------------------------------------
 class DebateStartRequest(BaseModel):
-    """启动辩论请求体。"""
+    """启动辩论请求体。
+
+    三个字段均为枚举，天然限制了合法取值；validator 做基础清洗，
+    并额外截断长度，防止超长输入（Prompt 注入/DoS）。
+    """
 
     taste: TastePreference = Field(..., description="口味偏好：辣 / 清淡")
     budget: BudgetLevel = Field(..., description="预算等级：低 / 中 / 高")
@@ -71,9 +75,9 @@ class DebateStartRequest(BaseModel):
     @field_validator("taste", "budget", "weather", mode="before")
     @classmethod
     def _strip(cls, v: object) -> object:
-        """对输入做基础清洗（去首尾空白），避免注入与非法值。"""
+        """对输入做基础清洗（去首尾空白 + 长度截断），避免注入与非法值。"""
         if isinstance(v, str):
-            v = v.strip()
+            v = v.strip()[:64]
         return v
 
 

@@ -1,14 +1,23 @@
-"""FastAPI 入口：暴露辩论相关 REST API。"""
-from __future__ import annotations
+"""FastAPI 入口：暴露辩论相关 REST API。
 
+注意：本模块不使用 `from __future__ import annotations`，
+因为 slowapi 的 @limiter.limit 装饰器会替换函数对象，导致字符串注解
+无法在 FastAPI 中解析。
+"""
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from .db import init_db
 from .debate import DebateService
 from .models import DebateStartRequest, Session
+
+# slowapi 频控：按客户端 IP 识别
+limiter = Limiter(key_func=get_remote_address)
 
 
 @asynccontextmanager
@@ -25,25 +34,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# 注册频控状态与处理器
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 
 service = DebateService()
-
-# 简单内存频控：单 IP 每分钟请求上限
-_rate_limit: dict[str, list[float]] = {}
-_RATE_LIMIT = int(__import__("os").getenv("RATE_LIMIT", "60"))
-
-
-def _is_rate_limited(client_ip: str) -> bool:
-    """简易滑动窗口频控。"""
-    import time
-
-    now = time.time()
-    window = _rate_limit.setdefault(client_ip, [])
-    window[:] = [t for t in window if now - t < 60]
-    if len(window) >= _RATE_LIMIT:
-        return True
-    window.append(now)
-    return False
 
 
 @app.get("/health")
@@ -52,12 +48,9 @@ def health() -> dict:
 
 
 @app.post("/api/debate/start", response_model=Session, status_code=201)
+@limiter.limit("5/minute")
 def start_debate(req: DebateStartRequest, request: Request) -> Session:
-    """启动辩论（US01）。"""
-    client_ip = request.client.host if request.client else "unknown"
-    if _is_rate_limited(client_ip):
-        raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
-
+    """启动辩论（US01），每 IP 每分钟限 5 次。"""
     try:
         session = service.start_debate(req)
     except Exception as exc:  # noqa: BLE001
