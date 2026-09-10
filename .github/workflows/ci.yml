@@ -37,6 +37,10 @@ jobs:
         run: |
           DATABASE_URL=sqlite:///./ci_migrate.db alembic upgrade head
 
+      - name: 评测脚本（evalset）
+        run: |
+          python eval/run_eval.py --no-serve
+
   docker:
     needs: test
     runs-on: ubuntu-latest
