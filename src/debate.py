@@ -79,17 +79,19 @@ class DebateService:
         """创建会话、持久化并立即执行辩论，返回完整 Pydantic 会话。"""
         with self._session_factory() as dbs:
             self._seed_agents(dbs)
+            agents = self._load_selected_agents(dbs, req)
             session = SessionModel(
                 taste=req.taste.value,
                 budget=req.budget.value,
                 weather=req.weather.value,
                 status=SessionStatus.RUNNING.value,
                 current_round=0,
+                agent_a_id=agents[0].agent_id,
+                agent_b_id=agents[1].agent_id,
             )
             dbs.add(session)
             dbs.flush()  # 触发 session_id 生成
 
-            agents = self._load_default_agents(dbs)
             self._run_debate(dbs, session, agents, req)
             dbs.commit()
             return self._orm_to_pydantic(dbs, session)
@@ -146,12 +148,23 @@ class DebateService:
                         name=a.name,
                         system_prompt=a.system_prompt,
                         avatar=a.avatar,
+                        description=a.description,
+                        is_preset=1,
                     )
                 )
+        dbs.flush()  # 确保预设立即落库，供后续 get 查询
 
-    def _load_default_agents(self, dbs: DbSession) -> list[AgentModel]:
-        """加载预设大厨的 ORM 对象。"""
-        return [dbs.get(AgentModel, a.agent_id) for a in build_default_agents()]
+    def _load_selected_agents(self, dbs: DbSession, req: DebateStartRequest) -> list[AgentModel]:
+        """根据请求选择两位大厨：不传则用默认，传了则从 DB 读取。"""
+        default = build_default_agents()
+        agent_a_id = req.agent_a_id or default[0].agent_id
+        agent_b_id = req.agent_b_id or default[1].agent_id
+
+        a = dbs.get(AgentModel, agent_a_id)
+        b = dbs.get(AgentModel, agent_b_id)
+        if a is None or b is None:
+            raise ValueError("指定的 Agent 不存在")
+        return [a, b]
 
     def _run_debate(
         self,
@@ -225,10 +238,14 @@ class DebateService:
 
     def _orm_to_pydantic(self, dbs: DbSession, orm: SessionModel) -> Session:
         rounds = sorted(orm.rounds, key=lambda r: (r.round_number, r.id))
-        speaker_ids = {r.speaker_id for r in rounds}
+        # 优先用 session 记录的大厨 id，回退到发言中出现的 speaker
+        agent_ids = {r.speaker_id for r in rounds}
+        for aid in (orm.agent_a_id, orm.agent_b_id):
+            if aid:
+                agent_ids.add(aid)
         agent_orms = (
-            dbs.query(AgentModel).filter(AgentModel.agent_id.in_(speaker_ids)).all()
-            if speaker_ids
+            dbs.query(AgentModel).filter(AgentModel.agent_id.in_(agent_ids)).all()
+            if agent_ids
             else []
         )
         agents = [
@@ -237,6 +254,9 @@ class DebateService:
                 name=a.name,
                 system_prompt=a.system_prompt,
                 avatar=a.avatar,
+                description=a.description or "",
+                is_preset=bool(a.is_preset),
+                created_by=a.created_by,
                 created_at=a.created_at,
             )
             for a in agent_orms

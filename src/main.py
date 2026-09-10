@@ -115,6 +115,9 @@ def start_debate(req: DebateStartRequest, request: Request) -> Session:
     """启动辩论（US01），每 IP 每分钟限 5 次。"""
     try:
         session = service.start_debate(req)
+    except ValueError as exc:
+        # 指定的 Agent 不存在
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"辩论执行失败: {exc}") from exc
     return session

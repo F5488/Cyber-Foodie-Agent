@@ -71,6 +71,8 @@ class DebateStartRequest(BaseModel):
     taste: TastePreference = Field(..., description="口味偏好：辣 / 清淡")
     budget: BudgetLevel = Field(..., description="预算等级：低 / 中 / 高")
     weather: WeatherCondition = Field(..., description="天气：晴 / 雨 / 雪")
+    agent_a_id: Optional[str] = Field(default=None, description="大厨 A 的 agent_id（不传用默认）")
+    agent_b_id: Optional[str] = Field(default=None, description="大厨 B 的 agent_id（不传用默认）")
 
     @field_validator("taste", "budget", "weather", mode="before")
     @classmethod

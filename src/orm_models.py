@@ -22,6 +22,8 @@ class SessionModel(Base):
     weather = Column(String(16), nullable=False)  # 晴 / 雨 / 雪
     status = Column(String(16), nullable=False, default="PENDING")
     current_round = Column(Integer, nullable=False, default=0)
+    agent_a_id = Column(String(32), nullable=True)  # Sprint 3：记录大厨 A
+    agent_b_id = Column(String(32), nullable=True)  # Sprint 3：记录大厨 B
     created_at = Column(DateTime, nullable=False, default=_now_utc, index=True)
 
     rounds = relationship(
@@ -47,6 +49,9 @@ class AgentModel(Base):
     name = Column(String(64), nullable=False, unique=True)
     system_prompt = Column(Text, nullable=False)
     avatar = Column(String(16), nullable=False, default="👨‍🍳")
+    description = Column(String(256), nullable=True)  # Sprint 3 新增
+    is_preset = Column(Integer, nullable=False, default=0)  # 1=预设（不可删）
+    created_by = Column(String(64), nullable=True)  # Sprint 3 新增
     created_at = Column(DateTime, nullable=False, default=_now_utc)
 
 
