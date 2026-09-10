@@ -12,9 +12,21 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from .agent_service import (
+    AgentNameConflictError,
+    AgentNotFoundError,
+    AgentService,
+    PresetAgentProtectedError,
+)
 from .db import init_db
 from .debate import DebateService
-from .models import DebateStartRequest, Session
+from .models import (
+    Agent,
+    AgentCreateRequest,
+    AgentUpdateRequest,
+    DebateStartRequest,
+    Session,
+)
 
 # slowapi 频控：按客户端 IP 识别
 limiter = Limiter(key_func=get_remote_address)
@@ -30,7 +42,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Cyber Foodie Agent",
     description="AI 大厨辩论系统 — 多轮自动辩论，产出结构化战报",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -40,11 +52,61 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 service = DebateService()
+agent_service = AgentService()
 
 
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Agent 管理（US04）
+# ---------------------------------------------------------------------------
+@app.get("/api/agents", response_model=list[Agent])
+def list_agents() -> list[Agent]:
+    """列出全部 Agent（预设 + 自定义）。"""
+    return agent_service.list_agents()
+
+
+@app.post("/api/agents", response_model=Agent, status_code=201)
+def create_agent(req: AgentCreateRequest) -> Agent:
+    """创建自定义 Agent。"""
+    try:
+        return agent_service.create_agent(req)
+    except AgentNameConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.put("/api/agents/{agent_id}", response_model=Agent)
+def update_agent(agent_id: str, req: AgentUpdateRequest) -> Agent:
+    """更新 Agent（仅更新提供的字段）。"""
+    try:
+        return agent_service.update_agent(agent_id, req)
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AgentNameConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.delete("/api/agents/{agent_id}", status_code=204)
+def delete_agent(agent_id: str) -> None:
+    """删除 Agent（预设不可删）。"""
+    try:
+        agent_service.delete_agent(agent_id)
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PresetAgentProtectedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@app.post("/api/agents/{agent_id}/clone", response_model=Agent, status_code=201)
+def clone_agent(agent_id: str) -> Agent:
+    """克隆 Agent（含预设），返回可编辑副本。"""
+    try:
+        return agent_service.clone_agent(agent_id)
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.post("/api/debate/start", response_model=Session, status_code=201)

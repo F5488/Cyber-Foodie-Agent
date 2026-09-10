@@ -91,7 +91,35 @@ class Agent(BaseModel):
     name: str
     system_prompt: str
     avatar: str = "👨‍🍳"
+    description: str = ""
+    is_preset: bool = False
+    created_by: Optional[str] = None
     created_at: datetime = Field(default_factory=_now_utc)
+
+
+class AgentCreateRequest(BaseModel):
+    """创建自定义 Agent 请求体（US04）。"""
+
+    name: str = Field(..., max_length=50, description="Agent 名称（≤50 字符）")
+    system_prompt: str = Field(..., max_length=2000, description="系统提示词（≤2000 字符）")
+    avatar: str = Field(default="👨‍🍳", max_length=16)
+    description: str = Field(default="", max_length=256)
+
+    @field_validator("name", "system_prompt", "avatar", "description", mode="before")
+    @classmethod
+    def _strip(cls, v: object) -> object:
+        if isinstance(v, str):
+            v = v.strip()[:2000]
+        return v
+
+
+class AgentUpdateRequest(BaseModel):
+    """更新 Agent 请求体（US04），字段可选。"""
+
+    name: Optional[str] = Field(default=None, max_length=50)
+    system_prompt: Optional[str] = Field(default=None, max_length=2000)
+    avatar: Optional[str] = Field(default=None, max_length=16)
+    description: Optional[str] = Field(default=None, max_length=256)
 
 
 class DebateRound(BaseModel):
