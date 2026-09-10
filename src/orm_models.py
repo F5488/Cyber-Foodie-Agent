@@ -28,7 +28,7 @@ class SessionModel(Base):
         "DebateRoundModel",
         back_populates="session",
         cascade="all, delete-orphan",
-        order_by="DebateRoundModel.round_number",
+        order_by="DebateRoundModel.id",
     )
     recommendation = relationship(
         "RecommendationModel",
@@ -55,7 +55,7 @@ class DebateRoundModel(Base):
 
     __tablename__ = "debate_rounds"
 
-    id = Column(String(32), primary_key=True, default=new_id)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(
         String(32), ForeignKey("sessions.session_id"), nullable=False, index=True
     )
