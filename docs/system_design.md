@@ -192,6 +192,9 @@ erDiagram
         string name
         string system_prompt
         string avatar
+        string description
+        bool is_preset
+        string created_by
         datetime created_at
     }
 
@@ -211,6 +214,9 @@ erDiagram
         string reason
         string pros_cons
         float score
+        string winner_agent
+        int menu_item_id
+        float price
         datetime created_at
     }
 
@@ -221,6 +227,7 @@ erDiagram
         string category
         string tags
         bool availability
+        string source
     }
 ```
 
@@ -228,8 +235,9 @@ erDiagram
 
 - 主键：`SESSIONS.session_id`、`AGENTS.agent_id`、`DEBATE_ROUNDS.id`、`RECOMMENDATIONS.id`、`MENUS.id`。
 - 外键：`DEBATE_ROUNDS.session_id → SESSIONS`、`DEBATE_ROUNDS.speaker_id → AGENTS`、`RECOMMENDATIONS.session_id → SESSIONS`。
-- 建议索引：`SESSIONS(created_at)`、`DEBATE_ROUNDS(session_id, round_number)`、`RECOMMENDATIONS(session_id)`。
-- `SESSION_AGENTS` 为会话-大厨多对多关联表（用于拓展：自定义 Agent 参与辩论）。
+- 建议索引：`SESSIONS(created_at)`、`DEBATE_ROUNDS(session_id, round_number)`、`RECOMMENDATIONS(session_id)`、`MENUS(category)`。
+- `SESSIONS.agent_a_id` / `agent_b_id`（Sprint 3）记录本次辩论使用的大厨。
+- `RECOMMENDATIONS.menu_item_id` / `price`（Sprint 3）指向推荐菜品，与 `MENUS.id` 关联。
 
 ---
 

@@ -31,7 +31,11 @@ jobs:
         run: |
           pytest tests/unit tests/integration tests/bdd \
             --cov=src --cov-report=term-missing \
-            --cov-fail-under=70
+            --cov-fail-under=75
+
+      - name: 数据库迁移验证（Alembic）
+        run: |
+          DATABASE_URL=sqlite:///./ci_migrate.db alembic upgrade head
 
   docker:
     needs: test
