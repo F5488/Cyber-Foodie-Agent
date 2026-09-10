@@ -84,6 +84,15 @@ def get_rounds(session_id: str) -> dict:
     return {"session_id": session_id, "status": session.status, "rounds": rounds}
 
 
+@app.get("/api/debate/{session_id}/report")
+def get_report(session_id: str) -> dict:
+    """返回会话的结构化战报（US03）。"""
+    report = service.get_report(session_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="战报不存在")
+    return report.model_dump(mode="json")
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(
     request: Request, exc: Exception

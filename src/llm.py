@@ -53,6 +53,14 @@ class MockLLMClient(LLMClient):
     """Mock 客户端：无需 API Key，按大厨身份返回预设风格发言。"""
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
+        # 战报请求：返回结构化 JSON
+        if "美食裁判" in system_prompt or "结构化战报" in system_prompt:
+            return (
+                '{"final_choice": "麻辣香锅", '
+                '"reason": "天气偏热且用户喜辣，川辣派方案更契合口味。", '
+                '"pros_cons": {"pros": ["口味刺激、开胃下饭"], "cons": ["偏油腻、易上火"]}, '
+                '"score": 8.5, "winner_agent": "川辣派"}'
+            )
         name = "大厨"
         if "川辣派" in system_prompt:
             name = "川辣派"

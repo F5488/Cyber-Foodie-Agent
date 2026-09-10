@@ -116,7 +116,18 @@ class Recommendation(BaseModel):
     reason: str
     pros_cons: ProsCons = Field(default_factory=ProsCons)
     score: float = Field(ge=0.0, le=10.0, description="综合评分 0~10")
+    winner_agent: str = ""
     created_at: datetime = Field(default_factory=_now_utc)
+
+
+class Report(BaseModel):
+    """战报生成器输出契约（US03），含获胜方。"""
+
+    final_choice: str
+    reason: str
+    pros_cons: ProsCons = Field(default_factory=ProsCons)
+    score: float = Field(ge=0.0, le=10.0, description="综合评分 0~10")
+    winner_agent: str
 
 
 class Session(BaseModel):

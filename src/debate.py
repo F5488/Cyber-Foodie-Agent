@@ -25,7 +25,8 @@ from .models import (
     TastePreference,
     WeatherCondition,
 )
-from .orm_models import AgentModel, DebateRoundModel, SessionModel
+from .orm_models import AgentModel, DebateRoundModel, RecommendationModel, SessionModel
+from .report import generate_report
 
 # 允许的轮次上限，防御异常输入
 MAX_ROUNDS = 10
@@ -116,6 +117,22 @@ class DebateService:
             orms = dbs.query(SessionModel).order_by(SessionModel.created_at.desc()).all()
             return [self._orm_to_pydantic(dbs, o) for o in orms]
 
+    def get_report(self, session_id: str) -> Optional[Recommendation]:
+        """返回某会话的战报（US03），无战报返回 None。"""
+        with self._session_factory() as dbs:
+            orm = dbs.get(SessionModel, session_id)
+            if orm is None or orm.recommendation is None:
+                return None
+            rec = orm.recommendation
+            return Recommendation(
+                final_choice=rec.final_choice,
+                reason=rec.reason,
+                pros_cons=ProsCons(pros=rec.pros or [], cons=rec.cons or []),
+                score=rec.score,
+                winner_agent=rec.winner_agent,
+                created_at=rec.created_at,
+            )
+
     # ------------------------------------------------------------------
     # 内部：Agent 与辩论编排
     # ------------------------------------------------------------------
@@ -177,6 +194,20 @@ class DebateService:
         session.current_round = self._rounds
         session.status = SessionStatus.SUCCESS.value
 
+        # 辩论结束，生成结构化战报并持久化（US03）
+        report = generate_report(self._llm, pydantic_rounds)
+        dbs.add(
+            RecommendationModel(
+                session_id=session.session_id,
+                final_choice=report.final_choice,
+                reason=report.reason,
+                pros=report.pros_cons.pros,
+                cons=report.pros_cons.cons,
+                score=report.score,
+                winner_agent=report.winner_agent,
+            )
+        )
+
     # ------------------------------------------------------------------
     # 内部：ORM <-> Pydantic 转换
     # ------------------------------------------------------------------
@@ -219,6 +250,7 @@ class DebateService:
                 reason=rec.reason,
                 pros_cons=ProsCons(pros=rec.pros or [], cons=rec.cons or []),
                 score=rec.score,
+                winner_agent=rec.winner_agent,
                 created_at=rec.created_at,
             )
 
