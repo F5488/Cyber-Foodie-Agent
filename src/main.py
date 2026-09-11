@@ -43,6 +43,8 @@ from .models import (  # noqa: E402
     DebateStartRequest,
     Menu,
     MenuImportRequest,
+    PromptGenerateRequest,
+    PromptGenerateResponse,
     Session,
 )
 
@@ -152,6 +154,12 @@ def clone_agent(agent_id: str) -> Agent:
         return agent_service.clone_agent(agent_id)
     except AgentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/agents/generate-prompt", response_model=PromptGenerateResponse)
+def generate_agent_prompt(req: PromptGenerateRequest) -> PromptGenerateResponse:
+    """根据一句话描述生成 system_prompt（US04 体验优化）。"""
+    return PromptGenerateResponse(system_prompt=agent_service.generate_prompt(req.description))
 
 
 @app.post("/api/debate/start", response_model=Session, status_code=201)

@@ -124,6 +124,27 @@ class AgentUpdateRequest(BaseModel):
     description: Optional[str] = Field(default=None, max_length=256)
 
 
+class PromptGenerateRequest(BaseModel):
+    """一句话生成 system_prompt 请求体（US04 体验优化）。"""
+
+    description: str = Field(
+        ..., max_length=500, description="用自然语言描述想要的 Agent 风格，如「喜欢日料、不吃辣」"
+    )
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _strip(cls, v: object) -> object:
+        if isinstance(v, str):
+            v = v.strip()[:500]
+        return v
+
+
+class PromptGenerateResponse(BaseModel):
+    """一句话生成 system_prompt 响应体。"""
+
+    system_prompt: str
+
+
 class DebateRound(BaseModel):
     """单条发言。"""
 

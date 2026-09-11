@@ -10,6 +10,17 @@ import os
 import httpx
 import streamlit as st
 
+# 兼容两种启动方式：`streamlit run src/frontend.py`（脚本目录在 sys.path）
+# 与 `python -m streamlit run src/frontend.py`（项目根在 sys.path）
+try:
+    from src.agent_templates import AGENT_TEMPLATES
+except ModuleNotFoundError:  # pragma: no cover
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from src.agent_templates import AGENT_TEMPLATES
+
 # 后端地址：默认用 127.0.0.1（避免 localhost 被系统代理拦截），Docker 内通过环境变量指向 backend 服务
 API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8000")
 
@@ -154,9 +165,71 @@ def render_debate_page() -> None:
 # ---------------------------------------------------------------------------
 # 页面：Agent 管理
 # ---------------------------------------------------------------------------
+def _open_editor(name: str, avatar: str, description: str, system_prompt: str) -> None:
+    """打开编辑表单（预填模板/预设内容），并记住当前编辑状态。"""
+    st.session_state["editing_agent"] = {
+        "name": name,
+        "avatar": avatar,
+        "description": description,
+        "system_prompt": system_prompt,
+    }
+
+
+def _render_editor() -> bool:
+    """渲染编辑表单（system_prompt 已预填）。返回是否成功创建。"""
+    editing = st.session_state.get("editing_agent")
+    if not editing:
+        return False
+
+    st.success(f"已载入模板「{editing['name']}」，可修改后保存。")
+    with st.form("edit_agent"):
+        name = st.text_input("名称（≤50 字符）", value=editing["name"])
+        description = st.text_input("描述（可选）", value=editing.get("description", ""))
+        avatar = st.text_input("头像 emoji", value=editing.get("avatar", "👨‍🍳"))
+        system_prompt = st.text_area(
+            "系统提示词（≤2000 字符）", value=editing["system_prompt"], height=180
+        )
+        c1, c2 = st.columns(2)
+        with c1:
+            submitted = st.form_submit_button("✅ 保存创建", use_container_width=True)
+        with c2:
+            cancelled = st.form_submit_button("取消", use_container_width=True)
+
+    if cancelled:
+        st.session_state.pop("editing_agent", None)
+        st.rerun()
+
+    if submitted:
+        if not name or not system_prompt:
+            st.error("名称和系统提示词必填")
+            return False
+        resp = _post(
+            "/api/agents",
+            {
+                "name": name,
+                "system_prompt": system_prompt,
+                "avatar": avatar,
+                "description": description,
+            },
+            timeout=15.0,
+        )
+        if resp is not None and resp.status_code == 201:
+            st.session_state.pop("editing_agent", None)
+            st.success(f"已创建「{resp.json()['name']}」")
+            st.rerun()
+        elif resp is not None:
+            st.error(f"创建失败（{resp.status_code}）：{resp.text}")
+        else:
+            st.error("连接后端失败：请确认 uvicorn 已启动")
+    return False
+
+
 def render_agent_page() -> None:
     st.title("🧑‍🍳 Agent 管理")
 
+    # ---------------------------------------------------------------
+    # 已有 Agent 列表
+    # ---------------------------------------------------------------
     agents = _load_agents()
     st.subheader("已有 Agent")
     for a in agents:
@@ -170,50 +243,94 @@ def render_agent_page() -> None:
                 key=f"sp_{a['agent_id']}",
                 disabled=True,
             )
-            col1, col2, col3 = st.columns(3)
-            with col1:
+            cols = st.columns(3)
+            with cols[0]:
+                # P1：以此为基础创建（预填 system_prompt，可改名字）
+                if st.button("✨ 以此为基础创建", key=f"base_{a['agent_id']}"):
+                    _open_editor(
+                        name=f"{a['name']}（我的版本）",
+                        avatar=a.get("avatar", "👨‍🍳"),
+                        description=a.get("description", ""),
+                        system_prompt=a["system_prompt"],
+                    )
+                    st.rerun()
+            with cols[1]:
                 if st.button("📋 克隆", key=f"clone_{a['agent_id']}"):
                     resp = _post(f"/api/agents/{a['agent_id']}/clone", timeout=15.0)
-                    if resp and resp.status_code == 201:
+                    if resp is not None and resp.status_code == 201:
                         st.success(f"已克隆为「{resp.json()['name']}」")
                         st.rerun()
-            with col2:
+            with cols[2]:
                 if not a.get("is_preset"):
                     if st.button("🗑️ 删除", key=f"del_{a['agent_id']}"):
                         resp = _delete(f"/api/agents/{a['agent_id']}")
-                        if resp and resp.status_code == 204:
+                        if resp is not None and resp.status_code == 204:
                             st.success("已删除")
                             st.rerun()
-                        elif resp:
+                        elif resp is not None:
                             st.error(resp.text)
 
+    # ---------------------------------------------------------------
+    # 编辑区（点模板或被点「以此为基础创建」后显示）
+    # ---------------------------------------------------------------
     st.markdown("---")
+    if st.session_state.get("editing_agent"):
+        st.subheader("✏️ 编辑 Agent")
+        _render_editor()
+        return
+
+    # ---------------------------------------------------------------
+    # P2：一句话生成 Prompt
+    # ---------------------------------------------------------------
     st.subheader("新建 Agent")
-    with st.form("new_agent"):
-        name = st.text_input("名称（≤50 字符）")
-        description = st.text_input("描述（可选）")
-        avatar = st.text_input("头像 emoji", value="👨‍🍳")
-        system_prompt = st.text_area("系统提示词（≤2000 字符）", height=150)
-        submitted = st.form_submit_button("创建", use_container_width=True)
-    if submitted:
-        if not name or not system_prompt:
-            st.error("名称和系统提示词必填")
+    with st.form("gen_prompt"):
+        desc = st.text_input(
+            "用自然语言描述（可选）",
+            placeholder="例如：喜欢日料、追求食材新鲜、不吃辣",
+        )
+        gen = st.form_submit_button("🪄 生成 Prompt", use_container_width=True)
+    if gen:
+        if not desc:
+            st.warning("请先输入一句描述")
         else:
-            resp = _post(
-                "/api/agents",
-                {
-                    "name": name,
-                    "system_prompt": system_prompt,
-                    "avatar": avatar,
-                    "description": description,
-                },
-                timeout=15.0,
-            )
-            if resp and resp.status_code == 201:
-                st.success(f"已创建「{resp.json()['name']}」")
+            resp = _post("/api/agents/generate-prompt", {"description": desc}, timeout=60.0)
+            if resp is not None and resp.status_code == 200:
+                _open_editor(
+                    name=desc[:20],
+                    avatar="🤖",
+                    description=desc[:50],
+                    system_prompt=resp.json()["system_prompt"],
+                )
+                st.info("已生成 Prompt，可在下方编辑区微调后保存")
                 st.rerun()
-            elif resp:
-                st.error(resp.text)
+            elif resp is not None:
+                st.error(f"生成失败（{resp.status_code}）：{resp.text}")
+            else:
+                st.error("连接后端失败：请确认 uvicorn 已启动")
+
+    # ---------------------------------------------------------------
+    # P0：风格模板卡片库
+    # ---------------------------------------------------------------
+    st.markdown("**👉 或直接选一个风格模板一键套用：**")
+    # 每行 4 个卡片，共 2 行
+    for row_start in range(0, len(AGENT_TEMPLATES), 4):
+        row = AGENT_TEMPLATES[row_start : row_start + 4]
+        cols = st.columns(4)
+        for col, tpl in zip(cols, row):
+            with col:
+                with st.container(border=True):
+                    st.markdown(f"### {tpl.avatar} {tpl.name}")
+                    st.caption(tpl.description)
+                    if st.button("用这个模板", key=f"tpl_{tpl.name}", use_container_width=True):
+                        _open_editor(
+                            name=tpl.name,
+                            avatar=tpl.avatar,
+                            description=tpl.description,
+                            system_prompt=tpl.system_prompt,
+                        )
+                        st.rerun()
+
+    st.caption("💡 选模板后会自动填入系统提示词，你只需改个名字即可保存。")
 
 
 # ---------------------------------------------------------------------------

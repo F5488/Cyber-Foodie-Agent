@@ -101,3 +101,46 @@ def test_clone_not_found(session_factory):
     svc = _svc(session_factory)
     with pytest.raises(AgentNotFoundError):
         svc.clone_agent("nonexistent")
+
+
+# ---------------------------------------------------------------------------
+# 模板库 与 一句话生成 Prompt（US04 体验优化）
+# ---------------------------------------------------------------------------
+def test_templates_count_and_fields():
+    from src.agent_templates import AGENT_TEMPLATES
+
+    assert len(AGENT_TEMPLATES) >= 6
+    for t in AGENT_TEMPLATES:
+        assert t.avatar and t.name and t.description and t.system_prompt
+        assert len(t.system_prompt) <= 2000
+
+
+def test_get_template_by_name():
+    from src.agent_templates import get_template
+
+    assert get_template("川辣派") is not None
+    assert get_template("不存在的风格") is None
+
+
+def test_generate_prompt_with_mock(session_factory):
+    from src.agent_service import AgentService
+    from src.llm import MockLLMClient
+
+    svc = AgentService(session_factory=session_factory, llm=MockLLMClient())
+    prompt = svc.generate_prompt("喜欢日料、不吃辣")
+    assert prompt
+    assert len(prompt) <= 2000
+
+
+def test_generate_prompt_fallback_on_llm_error(session_factory):
+    """LLM 抛异常时应降级为规则模板，而非报错。"""
+    from src.agent_service import AgentService
+    from src.llm import LLMClient, LLMError
+
+    class _BrokenLLM(LLMClient):
+        def generate(self, system_prompt: str, user_prompt: str) -> str:
+            raise LLMError("模拟失败")
+
+    svc = AgentService(session_factory=session_factory, llm=_BrokenLLM())
+    prompt = svc.generate_prompt("喜欢日料")
+    assert "日料" in prompt
