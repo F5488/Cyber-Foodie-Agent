@@ -8,6 +8,7 @@ import os
 import re
 from typing import Optional
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
 from . import db
@@ -149,20 +150,27 @@ class DebateService:
     # 内部：Agent 与辩论编排
     # ------------------------------------------------------------------
     def _seed_agents(self, dbs: DbSession) -> None:
-        """确保预设两位大厨已写入 agents 表（幂等）。"""
+        """确保预设两位大厨已写入 agents 表（幂等，并发安全）。
+
+        并发辩论时多个线程可能同时通过存在性检查 → 同时 INSERT 撞
+        name 唯一约束。用 savepoint 包裹单条插入，冲突仅回滚该条并忽略。
+        """
         for a in build_default_agents():
-            if dbs.get(AgentModel, a.agent_id) is None:
-                dbs.add(
-                    AgentModel(
-                        agent_id=a.agent_id,
-                        name=a.name,
-                        system_prompt=a.system_prompt,
-                        avatar=a.avatar,
-                        description=a.description,
-                        is_preset=1,
+            try:
+                with dbs.begin_nested():  # savepoint：冲突只回滚这一条
+                    dbs.add(
+                        AgentModel(
+                            agent_id=a.agent_id,
+                            name=a.name,
+                            system_prompt=a.system_prompt,
+                            avatar=a.avatar,
+                            description=a.description,
+                            is_preset=1,
+                        )
                     )
-                )
-        dbs.flush()  # 确保预设立即落库，供后续 get 查询
+            except IntegrityError:
+                # 其他线程已插入同名 Agent，忽略即可
+                continue
 
     def _load_selected_agents(self, dbs: DbSession, req: DebateStartRequest) -> list[AgentModel]:
         """根据请求选择两位大厨：不传则用默认，传了则从 DB 读取。"""
