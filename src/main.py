@@ -23,6 +23,7 @@ from .agent_service import (
 )
 from .db import init_db
 from .debate import DebateService
+from .llm import get_llm_info
 from .menu_service import MenuService
 from .models import (
     Agent,
@@ -89,7 +90,8 @@ menu_service = MenuService()
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok"}
+    """健康检查，附带 LLM 配置摘要（不含 api_key）。"""
+    return {"status": "ok", **get_llm_info()}
 
 
 # ---------------------------------------------------------------------------

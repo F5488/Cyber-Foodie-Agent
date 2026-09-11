@@ -306,6 +306,17 @@ with st.sidebar:
     st.title("🍜 Cyber Foodie")
     page = st.radio("导航", ["💬 辩论", "🧑‍🍳 Agent 管理", "🍽️ 菜单管理"])
 
+    # 显示当前 LLM 配置（来自 /health）
+    health = _get("/health")
+    if health is not None and health.status_code == 200:
+        info = health.json()
+        st.caption(
+            f"模型：{info.get('model')} | provider：{info.get('llm_provider')} | "
+            f"mock：{info.get('is_mock')}"
+        )
+    else:
+        st.caption("⚠️ 未连接后端")
+
     st.divider()
     if st.button("🔧 测试后端连接", use_container_width=True):
         import time
