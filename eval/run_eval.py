@@ -37,6 +37,8 @@ def _run_with_testclient(case: dict, menu_items: list[dict]) -> dict:
     """用 TestClient 内存运行单个场景（CI 模式）。"""
     os.environ["DATABASE_URL"] = "sqlite:///:memory:"
     os.environ["LLM_PROVIDER"] = "mock"
+    # 跳过 .env 加载，避免真实 LLM 配置覆盖上述测试设置
+    os.environ["CYBER_FOODIE_SKIP_DOTENV"] = "1"
 
     from fastapi.testclient import TestClient
     from src.main import app, limiter

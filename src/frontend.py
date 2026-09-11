@@ -6,12 +6,24 @@ from __future__ import annotations
 
 import json
 import os
+import time
 
 import httpx
 import streamlit as st
 
-# 后端地址：默认本地，Docker 内通过环境变量指向 backend 服务
-API_BASE = os.getenv("API_BASE", "http://localhost:8000")
+# 兼容两种启动方式：`streamlit run src/frontend.py`（脚本目录在 sys.path）
+# 与 `python -m streamlit run src/frontend.py`（项目根在 sys.path）
+try:
+    from src.agent_templates import AGENT_TEMPLATES
+except ModuleNotFoundError:  # pragma: no cover
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from src.agent_templates import AGENT_TEMPLATES
+
+# 后端地址：默认用 127.0.0.1（避免 localhost 被系统代理拦截），Docker 内通过环境变量指向 backend 服务
+API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8000")
 
 st.set_page_config(page_title="Cyber Foodie Agent", page_icon="🍜", layout="wide")
 
@@ -20,31 +32,31 @@ BUDGET_OPTIONS = ["低", "中", "高"]
 WEATHER_OPTIONS = ["晴", "雨", "雪"]
 
 
-def _get(path: str):
+def _get(path: str, params: dict | None = None):
     try:
-        return httpx.get(f"{API_BASE}{path}", timeout=15.0)
-    except httpx.ConnectError:
+        return httpx.get(f"{API_BASE}{path}", params=params, timeout=15.0)
+    except httpx.HTTPError:
         return None
 
 
 def _post(path: str, json_body: dict | None = None, timeout: float = 60.0):
     try:
         return httpx.post(f"{API_BASE}{path}", json=json_body, timeout=timeout)
-    except httpx.ConnectError:
+    except httpx.HTTPError:
         return None
 
 
 def _put(path: str, json_body: dict):
     try:
         return httpx.put(f"{API_BASE}{path}", json=json_body, timeout=15.0)
-    except httpx.ConnectError:
+    except httpx.HTTPError:
         return None
 
 
 def _delete(path: str):
     try:
         return httpx.delete(f"{API_BASE}{path}", timeout=15.0)
-    except httpx.ConnectError:
+    except httpx.HTTPError:
         return None
 
 
@@ -53,6 +65,63 @@ def _load_agents() -> list[dict]:
     if resp and resp.status_code == 200:
         return resp.json()
     return []
+
+
+def _render_chat(session: dict) -> None:
+    """渲染聊天式发言记录（可复用，轮询期间反复调用）。"""
+    agents_list = session.get("agents", [])
+    agent_by_id = {a.get("agent_id"): a for a in agents_list}
+    for round_item in session.get("rounds", []):
+        agent = agent_by_id.get(round_item["speaker_id"], {})
+        avatar = agent.get("avatar", "👨‍🍳")
+        with st.chat_message(name=round_item["speaker_name"], avatar=avatar):
+            st.caption(f"第 {round_item['round_number']} 轮")
+            st.write(round_item["content"])
+
+
+def _render_recommendation(rc: dict | None) -> None:
+    """渲染战报卡片（默认折叠）。"""
+    if not rc:
+        return
+    with st.expander(
+        f"🏆 战报：{rc['final_choice']}　（评分 {rc['score']}/10）", expanded=False
+    ):
+        col_a, col_b = st.columns([3, 1])
+        with col_a:
+            st.markdown(f"### 🍽️ 最终推荐：{rc['final_choice']}")
+            if rc.get("price"):
+                st.caption(f"💰 {rc['price']} 元 · 来源：菜单")
+            st.write(rc["reason"])
+        with col_b:
+            st.metric("综合评分", f"{rc['score']}/10")
+            st.markdown(f"**获胜方**：{rc.get('winner_agent', '—')}")
+
+        pros_cons = rc.get("pros_cons", {})
+        pc1, pc2 = st.columns(2)
+        with pc1:
+            st.markdown("**✅ 支持观点**")
+            for p in pros_cons.get("pros", []):
+                st.markdown(f"- {p}")
+        with pc2:
+            st.markdown("**⚠️ 反对观点**")
+            for c in pros_cons.get("cons", []):
+                st.markdown(f"- {c}")
+
+
+def _poll_until_complete(session_id: str, placeholder, max_wait: int = 120) -> dict | None:
+    """轮询会话状态直到完成，实时刷新聊天区。返回最终会话或 None（超时）。"""
+    last = None
+    for _ in range(max_wait):
+        resp = _get(f"/api/debate/{session_id}/status")
+        if resp is not None and resp.status_code == 200:
+            last = resp.json()
+            with placeholder.container():
+                st.info("⏳ 大厨正在辩论中……")
+                _render_chat(last)
+            if last.get("is_complete") or last.get("status") in ("SUCCESS", "FAILED"):
+                return last
+        time.sleep(1)
+    return None if last is None or not last.get("is_complete") else last
 
 
 # ---------------------------------------------------------------------------
@@ -98,65 +167,111 @@ def render_debate_page() -> None:
             "agent_a_id": agent_options[agent_a_label],
             "agent_b_id": agent_options[agent_b_label],
         }
-        resp = _post("/api/debate/start", payload)
+        # 异步启动：立即拿到 session_id，然后轮询实时展示
+        resp = _post("/api/debate/start-async", payload, timeout=15.0)
         if resp is None:
             st.error("无法连接后端，请先启动 FastAPI 服务（uvicorn src.main:app）。")
         elif resp.status_code >= 400:
             st.error(f"请求失败（{resp.status_code}）：{resp.text}")
         else:
-            st.session_state["session"] = resp.json()
+            session_id = resp.json()["session_id"]
+            st.markdown(
+                f"🍽️ **口味**：{taste}　💰 **预算**：{budget}　☁️ **天气**：{weather}"
+            )
+            placeholder = st.empty()
+            final = _poll_until_complete(session_id, placeholder)
+            if final is None:
+                st.warning("辩论超时，请重试")
+            else:
+                placeholder.empty()
+                _render_chat(final)
+                _render_recommendation(final.get("recommendation"))
+            return
 
     session = st.session_state.get("session")
     if session:
-        st.subheader(f"会话 `{session['session_id']}` · 状态 {session['status']}")
+        # 顶部：本次辩论的输入摘要
+        st.markdown(
+            f"🍽️ **口味**：{session.get('taste', '—')}　"
+            f"💰 **预算**：{session.get('budget', '—')}　"
+            f"☁️ **天气**：{session.get('weather', '—')}"
+        )
+        st.caption(f"会话 `{session['session_id']}` · 状态 {session['status']}")
 
-        agents_list = session.get("agents", [])
-        for round_item in session.get("rounds", []):
-            avatar = next(
-                (
-                    a.get("avatar", "👨‍🍳")
-                    for a in agents_list
-                    if a.get("agent_id") == round_item["speaker_id"]
-                ),
-                "👨‍🍳",
-            )
-            with st.chat_message(round_item["speaker_name"], avatar=avatar):
-                st.write(f"**第 {round_item['round_number']} 轮** — {round_item['speaker_name']}")
-                st.write(round_item["content"])
+        _render_chat(session)
 
-        recommendation = session.get("recommendation")
-        if recommendation:
-            st.markdown("---")
-            st.subheader("🏆 战报")
-            with st.container(border=True):
-                col_a, col_b = st.columns([3, 1])
-                with col_a:
-                    st.markdown(f"### 🍽️ 最终推荐：{recommendation['final_choice']}")
-                    if recommendation.get("price"):
-                        st.caption(f"💰 {recommendation['price']} 元 · 来源：菜单")
-                    st.write(recommendation["reason"])
-                with col_b:
-                    st.metric("综合评分", f"{recommendation['score']}/10")
-                    st.markdown(f"**获胜方**：{recommendation.get('winner_agent', '—')}")
-
-                pros_cons = recommendation.get("pros_cons", {})
-                pc1, pc2 = st.columns(2)
-                with pc1:
-                    st.markdown("**✅ 支持观点**")
-                    for p in pros_cons.get("pros", []):
-                        st.markdown(f"- {p}")
-                with pc2:
-                    st.markdown("**⚠️ 反对观点**")
-                    for c in pros_cons.get("cons", []):
-                        st.markdown(f"- {c}")
+        # 底部：战报卡片（默认折叠）
+        _render_recommendation(session.get("recommendation"))
 
 
 # ---------------------------------------------------------------------------
 # 页面：Agent 管理
 # ---------------------------------------------------------------------------
+def _open_editor(name: str, avatar: str, description: str, system_prompt: str) -> None:
+    """打开编辑表单（预填模板/预设内容），并记住当前编辑状态。"""
+    st.session_state["editing_agent"] = {
+        "name": name,
+        "avatar": avatar,
+        "description": description,
+        "system_prompt": system_prompt,
+    }
+
+
+def _render_editor() -> bool:
+    """渲染编辑表单（system_prompt 已预填）。返回是否成功创建。"""
+    editing = st.session_state.get("editing_agent")
+    if not editing:
+        return False
+
+    st.success(f"已载入模板「{editing['name']}」，可修改后保存。")
+    with st.form("edit_agent"):
+        name = st.text_input("名称（≤50 字符）", value=editing["name"])
+        description = st.text_input("描述（可选）", value=editing.get("description", ""))
+        avatar = st.text_input("头像 emoji", value=editing.get("avatar", "👨‍🍳"))
+        system_prompt = st.text_area(
+            "系统提示词（≤2000 字符）", value=editing["system_prompt"], height=180
+        )
+        c1, c2 = st.columns(2)
+        with c1:
+            submitted = st.form_submit_button("✅ 保存创建", use_container_width=True)
+        with c2:
+            cancelled = st.form_submit_button("取消", use_container_width=True)
+
+    if cancelled:
+        st.session_state.pop("editing_agent", None)
+        st.rerun()
+
+    if submitted:
+        if not name or not system_prompt:
+            st.error("名称和系统提示词必填")
+            return False
+        resp = _post(
+            "/api/agents",
+            {
+                "name": name,
+                "system_prompt": system_prompt,
+                "avatar": avatar,
+                "description": description,
+            },
+            timeout=15.0,
+        )
+        if resp is not None and resp.status_code == 201:
+            st.session_state.pop("editing_agent", None)
+            st.success(f"已创建「{resp.json()['name']}」")
+            st.rerun()
+        elif resp is not None:
+            st.error(f"创建失败（{resp.status_code}）：{resp.text}")
+        else:
+            st.error("连接后端失败：请确认 uvicorn 已启动")
+    return False
+
+
 def render_agent_page() -> None:
     st.title("🧑‍🍳 Agent 管理")
 
+    # ---------------------------------------------------------------
+    # 已有 Agent 列表
+    # ---------------------------------------------------------------
     agents = _load_agents()
     st.subheader("已有 Agent")
     for a in agents:
@@ -170,50 +285,94 @@ def render_agent_page() -> None:
                 key=f"sp_{a['agent_id']}",
                 disabled=True,
             )
-            col1, col2, col3 = st.columns(3)
-            with col1:
+            cols = st.columns(3)
+            with cols[0]:
+                # P1：以此为基础创建（预填 system_prompt，可改名字）
+                if st.button("✨ 以此为基础创建", key=f"base_{a['agent_id']}"):
+                    _open_editor(
+                        name=f"{a['name']}（我的版本）",
+                        avatar=a.get("avatar", "👨‍🍳"),
+                        description=a.get("description", ""),
+                        system_prompt=a["system_prompt"],
+                    )
+                    st.rerun()
+            with cols[1]:
                 if st.button("📋 克隆", key=f"clone_{a['agent_id']}"):
                     resp = _post(f"/api/agents/{a['agent_id']}/clone", timeout=15.0)
-                    if resp and resp.status_code == 201:
+                    if resp is not None and resp.status_code == 201:
                         st.success(f"已克隆为「{resp.json()['name']}」")
                         st.rerun()
-            with col2:
+            with cols[2]:
                 if not a.get("is_preset"):
                     if st.button("🗑️ 删除", key=f"del_{a['agent_id']}"):
                         resp = _delete(f"/api/agents/{a['agent_id']}")
-                        if resp and resp.status_code == 204:
+                        if resp is not None and resp.status_code == 204:
                             st.success("已删除")
                             st.rerun()
-                        elif resp:
+                        elif resp is not None:
                             st.error(resp.text)
 
+    # ---------------------------------------------------------------
+    # 编辑区（点模板或被点「以此为基础创建」后显示）
+    # ---------------------------------------------------------------
     st.markdown("---")
+    if st.session_state.get("editing_agent"):
+        st.subheader("✏️ 编辑 Agent")
+        _render_editor()
+        return
+
+    # ---------------------------------------------------------------
+    # P2：一句话生成 Prompt
+    # ---------------------------------------------------------------
     st.subheader("新建 Agent")
-    with st.form("new_agent"):
-        name = st.text_input("名称（≤50 字符）")
-        description = st.text_input("描述（可选）")
-        avatar = st.text_input("头像 emoji", value="👨‍🍳")
-        system_prompt = st.text_area("系统提示词（≤2000 字符）", height=150)
-        submitted = st.form_submit_button("创建", use_container_width=True)
-    if submitted:
-        if not name or not system_prompt:
-            st.error("名称和系统提示词必填")
+    with st.form("gen_prompt"):
+        desc = st.text_input(
+            "用自然语言描述（可选）",
+            placeholder="例如：喜欢日料、追求食材新鲜、不吃辣",
+        )
+        gen = st.form_submit_button("🪄 生成 Prompt", use_container_width=True)
+    if gen:
+        if not desc:
+            st.warning("请先输入一句描述")
         else:
-            resp = _post(
-                "/api/agents",
-                {
-                    "name": name,
-                    "system_prompt": system_prompt,
-                    "avatar": avatar,
-                    "description": description,
-                },
-                timeout=15.0,
-            )
-            if resp and resp.status_code == 201:
-                st.success(f"已创建「{resp.json()['name']}」")
+            resp = _post("/api/agents/generate-prompt", {"description": desc}, timeout=60.0)
+            if resp is not None and resp.status_code == 200:
+                _open_editor(
+                    name=desc[:20],
+                    avatar="🤖",
+                    description=desc[:50],
+                    system_prompt=resp.json()["system_prompt"],
+                )
+                st.info("已生成 Prompt，可在下方编辑区微调后保存")
                 st.rerun()
-            elif resp:
-                st.error(resp.text)
+            elif resp is not None:
+                st.error(f"生成失败（{resp.status_code}）：{resp.text}")
+            else:
+                st.error("连接后端失败：请确认 uvicorn 已启动")
+
+    # ---------------------------------------------------------------
+    # P0：风格模板卡片库
+    # ---------------------------------------------------------------
+    st.markdown("**👉 或直接选一个风格模板一键套用：**")
+    # 每行 4 个卡片，共 2 行
+    for row_start in range(0, len(AGENT_TEMPLATES), 4):
+        row = AGENT_TEMPLATES[row_start : row_start + 4]
+        cols = st.columns(4)
+        for col, tpl in zip(cols, row):
+            with col:
+                with st.container(border=True):
+                    st.markdown(f"### {tpl.avatar} {tpl.name}")
+                    st.caption(tpl.description)
+                    if st.button("用这个模板", key=f"tpl_{tpl.name}", use_container_width=True):
+                        _open_editor(
+                            name=tpl.name,
+                            avatar=tpl.avatar,
+                            description=tpl.description,
+                            system_prompt=tpl.system_prompt,
+                        )
+                        st.rerun()
+
+    st.caption("💡 选模板后会自动填入系统提示词，你只需改个名字即可保存。")
 
 
 # ---------------------------------------------------------------------------
@@ -229,15 +388,23 @@ def render_menu_page() -> None:
         submitted = st.form_submit_button("导入", use_container_width=True)
     if submitted and uploaded is not None:
         try:
-            data = json.load(uploaded)
+            # 明确读取字节并解析 JSON（对齐后端 {"items": [...]} 结构）
+            raw = uploaded.getvalue()
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            st.error(f"JSON 格式错误：{exc}")
+        else:
+            # 兼容两种结构：顶层 {"items": [...]} 或直接数组 [...]
+            if isinstance(data, list):
+                data = {"items": data}
             resp = _post("/api/menus/import", data, timeout=30.0)
-            if resp and resp.status_code == 201:
-                st.success(f"成功导入 {len(resp.json())} 道菜")
+            if resp is None:
+                st.error("连接后端失败：请确认 uvicorn 已启动")
+            elif resp.status_code == 201:
+                st.success(f"已导入 {len(resp.json())} 道菜")
                 st.rerun()
-            elif resp:
-                st.error(resp.text)
-        except json.JSONDecodeError:
-            st.error("JSON 格式错误")
+            else:
+                st.error(f"后端返回 {resp.status_code}：{resp.text}")
     elif submitted:
         st.warning("请先上传 JSON 文件（可参考 eval/sample_menu.json）")
 
@@ -258,41 +425,68 @@ def render_menu_page() -> None:
         params["max_price"] = max_price
 
     resp = _get("/api/menus")
-    if resp and resp.status_code == 200:
-        menus = resp.json()
-        # 客户端二次过滤（简单处理，也可用后端参数）
-        if params:
-            resp2 = httpx.get(f"{API_BASE}/api/menus", params=params, timeout=15.0)
-            if resp2.status_code == 200:
-                menus = resp2.json()
+    if resp is None:
+        st.error("连接后端失败：请确认 uvicorn 已启动")
+        return
+    if resp.status_code != 200:
+        st.error(f"后端返回 {resp.status_code}：{resp.text}")
+        return
 
-        if menus:
-            st.dataframe(
-                [
-                    {
-                        "ID": m["id"],
-                        "名称": m["name"],
-                        "价格": m["price"],
-                        "分类": m["category"],
-                        "标签": "/".join(m.get("tags", [])),
-                        "来源": m.get("source", "食堂"),
-                    }
-                    for m in menus
-                ],
-                use_container_width=True,
-            )
-        else:
-            st.info("暂无菜单数据，请先导入")
+    menus = resp.json()
+    # 服务端过滤
+    if params:
+        resp2 = _get("/api/menus", params=params)
+        if resp2 is not None and resp2.status_code == 200:
+            menus = resp2.json()
+
+    if menus:
+        st.dataframe(
+            [
+                {
+                    "ID": m["id"],
+                    "名称": m["name"],
+                    "价格": m["price"],
+                    "分类": m["category"],
+                    "标签": "/".join(m.get("tags", [])),
+                    "来源": m.get("source", "食堂"),
+                }
+                for m in menus
+            ],
+            use_container_width=True,
+        )
     else:
-        st.info("无法连接后端或暂无菜单")
+        st.info("菜单为空，已尝试自动导入，请刷新页面")
 
 
 # ---------------------------------------------------------------------------
-# 侧边栏导航 + 历史会话
+# 侧边栏导航 + 历史会话 + 连接测试
 # ---------------------------------------------------------------------------
 with st.sidebar:
     st.title("🍜 Cyber Foodie")
     page = st.radio("导航", ["💬 辩论", "🧑‍🍳 Agent 管理", "🍽️ 菜单管理"])
+
+    # 显示当前 LLM 配置（来自 /health）
+    health = _get("/health")
+    if health is not None and health.status_code == 200:
+        info = health.json()
+        st.caption(
+            f"模型：{info.get('model')} | provider：{info.get('llm_provider')} | "
+            f"mock：{info.get('is_mock')}"
+        )
+    else:
+        st.caption("⚠️ 未连接后端")
+
+    st.divider()
+    if st.button("🔧 测试后端连接", use_container_width=True):
+        url = f"{API_BASE}/health"
+        start = time.time()
+        try:
+            resp = httpx.get(url, timeout=5.0)
+            elapsed = (time.time() - start) * 1000
+            st.success(f"✅ 后端可达\n\nURL：{url}\n状态码：{resp.status_code}\n耗时：{elapsed:.1f} ms")
+        except httpx.HTTPError as exc:
+            elapsed = (time.time() - start) * 1000
+            st.error(f"❌ 连接失败\n\nURL：{url}\n异常：{type(exc).__name__}\n耗时：{elapsed:.1f} ms")
 
     st.divider()
     st.header("📚 历史会话")

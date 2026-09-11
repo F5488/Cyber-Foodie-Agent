@@ -5,15 +5,24 @@
   - openai_compatible  : DeepSeek / 硅基流动 等 OpenAI 兼容协议
   - azure_openai       : 微软 Azure OpenAI
 
+模型名解析（openai_compatible）：OPENAI_MODEL → DEFAULT_MODEL → deepseek-chat。
 所有外部调用均设置超时与重试（指数退避），满足防御性编程要求。
 """
 from __future__ import annotations
 
+import logging
 import os
+import time
 from abc import ABC, abstractmethod
 from typing import Optional
 
 import httpx
+
+# 使用 uvicorn.error 通道，保证日志出现在 uvicorn 启动终端
+logger = logging.getLogger("uvicorn.error")
+
+# 单次发言的最大 token 数（大厨发言为短文本，限制长度既提速又省费）
+MAX_TOKENS = 250
 
 
 class LLMError(RuntimeError):
@@ -23,10 +32,46 @@ class LLMError(RuntimeError):
 class LLMClient(ABC):
     """LLM 客户端统一接口。"""
 
+    provider: str = "unknown"
+
     @abstractmethod
     def generate(self, system_prompt: str, user_prompt: str) -> str:
         """根据系统提示词与用户输入，生成一段文本响应。"""
         raise NotImplementedError
+
+
+def _resolve_openai_model() -> str:
+    """解析 OpenAI 兼容协议的模型名：OPENAI_MODEL → DEFAULT_MODEL → 兜底。"""
+    return os.getenv("OPENAI_MODEL") or os.getenv("DEFAULT_MODEL") or "deepseek-chat"
+
+
+def _resolve_openai_base_url() -> str:
+    return os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com").rstrip("/")
+
+
+def get_llm_info() -> dict:
+    """返回当前 LLM 配置摘要（绝不含 api_key），供 /health 使用。"""
+    provider = os.getenv("LLM_PROVIDER", "mock").strip().lower()
+    if provider == "openai_compatible":
+        return {
+            "llm_provider": "openai_compatible",
+            "is_mock": False,
+            "model": _resolve_openai_model(),
+            "base_url": _resolve_openai_base_url(),
+        }
+    if provider == "azure_openai":
+        return {
+            "llm_provider": "azure_openai",
+            "is_mock": False,
+            "model": os.getenv("AZURE_OPENAI_DEPLOYMENT", ""),
+            "base_url": os.getenv("AZURE_OPENAI_ENDPOINT", "").rstrip("/"),
+        }
+    return {
+        "llm_provider": "mock",
+        "is_mock": True,
+        "model": "mock",
+        "base_url": "",
+    }
 
 
 def _retry_httpx_post(url: str, **kwargs) -> httpx.Response:
@@ -43,14 +88,14 @@ def _retry_httpx_post(url: str, **kwargs) -> httpx.Response:
         except (httpx.HTTPError, httpx.TimeoutException) as exc:  # noqa: B014
             last_err = exc
             if attempt < 3:
-                import time
-
                 time.sleep(2**attempt)
     raise LLMError(f"LLM 调用失败（已重试 3 次）: {last_err}")
 
 
 class MockLLMClient(LLMClient):
     """Mock 客户端：无需 API Key，按大厨身份返回预设风格发言。"""
+
+    provider = "mock"
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
         # 战报请求：返回结构化 JSON
@@ -106,35 +151,59 @@ class MockLLMClient(LLMClient):
 class OpenAICompatibleClient(LLMClient):
     """OpenAI 兼容协议客户端（DeepSeek / 硅基流动）。"""
 
+    provider = "openai_compatible"
+
     def __init__(self) -> None:
-        self.base_url = os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com").rstrip("/")
+        self.base_url = _resolve_openai_base_url()
         self.api_key = os.getenv("OPENAI_API_KEY", "")
-        self.model = os.getenv("OPENAI_MODEL", "deepseek-chat")
+        self.model = _resolve_openai_model()
         if not self.api_key:
             raise LLMError("缺少 OPENAI_API_KEY，无法使用 openai_compatible provider")
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
-        resp = _retry_httpx_post(
-            f"{self.base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            json={
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "temperature": 0.7,
-            },
+        url = f"{self.base_url}/chat/completions"
+        logger.info(
+            "LLM 调用: provider=%s model=%s url=%s", self.provider, self.model, url
+        )
+        start = time.time()
+        try:
+            resp = _retry_httpx_post(
+                url,
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "temperature": 0.7,
+                    # 大厨发言为短文本，限制长度避免冗长输出
+                    "max_tokens": MAX_TOKENS,
+                    # 关闭思考模式：DeepSeek 新模型默认开启 thinking，导致响应极慢；
+                    # 不识别的 provider 会静默忽略该参数。
+                    # 注意：不要同时传 reasoning_effort，二者冲突。
+                    "thinking": {"type": "disabled"},
+                },
+            )
+        except LLMError as exc:
+            logger.error("LLM 调用失败: %s", exc)
+            raise
+        elapsed = (time.time() - start) * 1000
+        logger.info(
+            "LLM 响应: status=%s 耗时=%.1fms", resp.status_code, elapsed
         )
         data = resp.json()
         try:
             return data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
+            logger.error("LLM 响应解析失败: %s", data)
             raise LLMError(f"解析 LLM 响应失败: {data}") from exc
 
 
 class AzureOpenAIClient(LLMClient):
     """Azure OpenAI 客户端。"""
+
+    provider = "azure_openai"
 
     def __init__(self) -> None:
         self.endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "").rstrip("/")
@@ -149,21 +218,32 @@ class AzureOpenAIClient(LLMClient):
             f"{self.endpoint}/openai/deployments/{self.deployment}"
             f"/chat/completions?api-version={self.api_version}"
         )
-        resp = _retry_httpx_post(
-            url,
-            headers={"api-key": self.api_key},
-            json={
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "temperature": 0.7,
-            },
+        logger.info(
+            "LLM 调用: provider=%s model=%s url=%s", self.provider, self.deployment, url
         )
+        start = time.time()
+        try:
+            resp = _retry_httpx_post(
+                url,
+                headers={"api-key": self.api_key},
+                json={
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "temperature": 0.7,
+                },
+            )
+        except LLMError as exc:
+            logger.error("LLM 调用失败: %s", exc)
+            raise
+        elapsed = (time.time() - start) * 1000
+        logger.info("LLM 响应: status=%s 耗时=%.1fms", resp.status_code, elapsed)
         data = resp.json()
         try:
             return data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
+            logger.error("LLM 响应解析失败: %s", data)
             raise LLMError(f"解析 LLM 响应失败: {data}") from exc
 
 
@@ -174,4 +254,11 @@ def get_llm_client() -> LLMClient:
         return OpenAICompatibleClient()
     if provider == "azure_openai":
         return AzureOpenAIClient()
+    if provider != "mock":
+        logger.warning(
+            "未知的 LLM_PROVIDER=%r，回退到 Mock 大厨（可选：mock/openai_compatible/azure_openai）",
+            provider,
+        )
+    else:
+        logger.warning("LLM key 未配置或 provider=mock，使用 Mock 大厨")
     return MockLLMClient()

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator
 
 
 def _now_utc() -> datetime:
@@ -124,6 +124,27 @@ class AgentUpdateRequest(BaseModel):
     description: Optional[str] = Field(default=None, max_length=256)
 
 
+class PromptGenerateRequest(BaseModel):
+    """一句话生成 system_prompt 请求体（US04 体验优化）。"""
+
+    description: str = Field(
+        ..., max_length=500, description="用自然语言描述想要的 Agent 风格，如「喜欢日料、不吃辣」"
+    )
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _strip(cls, v: object) -> object:
+        if isinstance(v, str):
+            v = v.strip()[:500]
+        return v
+
+
+class PromptGenerateResponse(BaseModel):
+    """一句话生成 system_prompt 响应体。"""
+
+    system_prompt: str
+
+
 class DebateRound(BaseModel):
     """单条发言。"""
 
@@ -179,6 +200,12 @@ class Session(BaseModel):
     rounds: list[DebateRound] = Field(default_factory=list)
     recommendation: Optional[Recommendation] = None
     created_at: datetime = Field(default_factory=_now_utc)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def is_complete(self) -> bool:
+        """辩论是否已结束（随响应序列化，供前端轮询判断）。"""
+        return self.status in (SessionStatus.SUCCESS, SessionStatus.FAILED)
 
 
 class Menu(BaseModel):

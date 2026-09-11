@@ -1,44 +1,87 @@
 """FastAPI 入口：暴露辩论相关 REST API。
 
-注意：本模块不使用 `from __future__ import annotations`，
-因为 slowapi 的 @limiter.limit 装饰器会替换函数对象，导致字符串注解
-无法在 FastAPI 中解析。
+注意：
+1. 本模块不使用 `from __future__ import annotations`，
+   因为 slowapi 的 @limiter.limit 装饰器会替换函数对象，导致字符串注解
+   无法在 FastAPI 中解析。
+2. 必须在导入任何业务模块（llm/debate/db 等）之前加载 .env，
+   因为 LLMClient 等对象在模块导入时即按环境变量初始化。
 """
+import json
+import logging
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from dotenv import load_dotenv
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from .agent_service import (
+# 加载 .env：显式 UTF-8（避免 Windows GBK 读取含中文注释的 .env 报错），
+# override=True 让 .env 优先于手动 set 的环境变量。
+# 测试/评测场景通过 CYBER_FOODIE_SKIP_DOTENV=1 跳过，避免覆盖其内存数据库与 Mock 设置。
+if not os.getenv("CYBER_FOODIE_SKIP_DOTENV"):
+    load_dotenv(encoding="utf-8", override=True)
+
+from .agent_service import (  # noqa: E402
     AgentNameConflictError,
     AgentNotFoundError,
     AgentService,
     PresetAgentProtectedError,
 )
-from .db import init_db
-from .debate import DebateService
-from .menu_service import MenuService
-from .models import (
+from .db import init_db  # noqa: E402
+from .debate import DebateService  # noqa: E402
+from .llm import get_llm_info  # noqa: E402
+from .menu_service import MenuService  # noqa: E402
+from .models import (  # noqa: E402
     Agent,
     AgentCreateRequest,
     AgentUpdateRequest,
     DebateStartRequest,
     Menu,
     MenuImportRequest,
+    PromptGenerateRequest,
+    PromptGenerateResponse,
     Session,
+    SessionStatus,
 )
+
+logger = logging.getLogger("uvicorn.error")
 
 # slowapi 频控：按客户端 IP 识别
 limiter = Limiter(key_func=get_remote_address)
 
 
+def _auto_import_sample_menu() -> None:
+    """若菜单表为空，自动导入 eval/sample_menu.json（兜底，保证开箱可用）。"""
+    svc = MenuService()
+    if svc.list_menus():
+        return  # 已有菜单，跳过
+
+    sample = Path(__file__).resolve().parent.parent / "eval" / "sample_menu.json"
+    if not sample.exists():
+        logger.warning("未找到示例菜单文件 %s，跳过自动导入", sample)
+        return
+
+    try:
+        data = json.loads(sample.read_text(encoding="utf-8"))
+        items = [Menu(**item) for item in data.get("items", [])]
+        if not items:
+            return
+        svc.import_menus(MenuImportRequest(items=items))
+        logger.info("自动导入 %d 道菜", len(items))
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        logger.warning("自动导入示例菜单失败：%s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用启动时初始化数据库表。"""
+    """应用启动时初始化数据库表，并自动导入示例菜单（若为空）。"""
     init_db()
+    _auto_import_sample_menu()
     yield
 
 
@@ -61,7 +104,8 @@ menu_service = MenuService()
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok"}
+    """健康检查，附带 LLM 配置摘要（不含 api_key）。"""
+    return {"status": "ok", **get_llm_info()}
 
 
 # ---------------------------------------------------------------------------
@@ -113,10 +157,16 @@ def clone_agent(agent_id: str) -> Agent:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.post("/api/agents/generate-prompt", response_model=PromptGenerateResponse)
+def generate_agent_prompt(req: PromptGenerateRequest) -> PromptGenerateResponse:
+    """根据一句话描述生成 system_prompt（US04 体验优化）。"""
+    return PromptGenerateResponse(system_prompt=agent_service.generate_prompt(req.description))
+
+
 @app.post("/api/debate/start", response_model=Session, status_code=201)
 @limiter.limit("5/minute")
 def start_debate(req: DebateStartRequest, request: Request) -> Session:
-    """启动辩论（US01），每 IP 每分钟限 5 次。"""
+    """启动辩论（US01），同步跑完并返回完整会话，每 IP 每分钟限 5 次。"""
     try:
         session = service.start_debate(req)
     except ValueError as exc:
@@ -125,6 +175,24 @@ def start_debate(req: DebateStartRequest, request: Request) -> Session:
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"辩论执行失败: {exc}") from exc
     return session
+
+
+@app.post("/api/debate/start-async", status_code=202)
+@limiter.limit("5/minute")
+def start_debate_async(
+    req: DebateStartRequest, request: Request, background_tasks: BackgroundTasks
+) -> dict:
+    """异步启动辩论：立即返回 session_id（202），后台跑辩论循环。
+
+    前端可轮询 GET /api/debate/{session_id}/status 实时查看发言逐条出现。
+    """
+    try:
+        session_id = service.create_session(req)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    background_tasks.add_task(service.run_debate, session_id, req)
+    return {"session_id": session_id, "status": SessionStatus.RUNNING.value, "is_complete": False}
 
 
 @app.get("/api/debate/{session_id}/status", response_model=Session)
