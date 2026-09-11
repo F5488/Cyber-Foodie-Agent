@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 # 必须在导入 src.db / src.main 之前设置，确保使用内存 SQLite
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 os.environ["LLM_PROVIDER"] = "mock"
+# 测试时跳过 .env 加载，避免真实的 LLM 配置覆盖上述测试设置（会打真实 API）
+os.environ["CYBER_FOODIE_SKIP_DOTENV"] = "1"
 
 from src.db import Base, engine  # noqa: E402
 

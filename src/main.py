@@ -1,31 +1,42 @@
 """FastAPI 入口：暴露辩论相关 REST API。
 
-注意：本模块不使用 `from __future__ import annotations`，
-因为 slowapi 的 @limiter.limit 装饰器会替换函数对象，导致字符串注解
-无法在 FastAPI 中解析。
+注意：
+1. 本模块不使用 `from __future__ import annotations`，
+   因为 slowapi 的 @limiter.limit 装饰器会替换函数对象，导致字符串注解
+   无法在 FastAPI 中解析。
+2. 必须在导入任何业务模块（llm/debate/db 等）之前加载 .env，
+   因为 LLMClient 等对象在模块导入时即按环境变量初始化。
 """
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from .agent_service import (
+# 加载 .env：显式 UTF-8（避免 Windows GBK 读取含中文注释的 .env 报错），
+# override=True 让 .env 优先于手动 set 的环境变量。
+# 测试/评测场景通过 CYBER_FOODIE_SKIP_DOTENV=1 跳过，避免覆盖其内存数据库与 Mock 设置。
+if not os.getenv("CYBER_FOODIE_SKIP_DOTENV"):
+    load_dotenv(encoding="utf-8", override=True)
+
+from .agent_service import (  # noqa: E402
     AgentNameConflictError,
     AgentNotFoundError,
     AgentService,
     PresetAgentProtectedError,
 )
-from .db import init_db
-from .debate import DebateService
-from .llm import get_llm_info
-from .menu_service import MenuService
-from .models import (
+from .db import init_db  # noqa: E402
+from .debate import DebateService  # noqa: E402
+from .llm import get_llm_info  # noqa: E402
+from .menu_service import MenuService  # noqa: E402
+from .models import (  # noqa: E402
     Agent,
     AgentCreateRequest,
     AgentUpdateRequest,
