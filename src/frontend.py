@@ -119,38 +119,42 @@ def render_debate_page() -> None:
 
     session = st.session_state.get("session")
     if session:
-        st.subheader(f"会话 `{session['session_id']}` · 状态 {session['status']}")
+        # 顶部：本次辩论的输入摘要
+        st.markdown(
+            f"🍽️ **口味**：{session.get('taste', '—')}　"
+            f"💰 **预算**：{session.get('budget', '—')}　"
+            f"☁️ **天气**：{session.get('weather', '—')}"
+        )
+        st.caption(f"会话 `{session['session_id']}` · 状态 {session['status']}")
 
+        # 聊天式发言记录（st.chat_message 按说话人区分头像）
         agents_list = session.get("agents", [])
+        agent_by_id = {a.get("agent_id"): a for a in agents_list}
         for round_item in session.get("rounds", []):
-            avatar = next(
-                (
-                    a.get("avatar", "👨‍🍳")
-                    for a in agents_list
-                    if a.get("agent_id") == round_item["speaker_id"]
-                ),
-                "👨‍🍳",
-            )
-            with st.chat_message(round_item["speaker_name"], avatar=avatar):
-                st.write(f"**第 {round_item['round_number']} 轮** — {round_item['speaker_name']}")
+            agent = agent_by_id.get(round_item["speaker_id"], {})
+            avatar = agent.get("avatar", "👨‍🍳")
+            with st.chat_message(name=round_item["speaker_name"], avatar=avatar):
+                st.caption(f"第 {round_item['round_number']} 轮")
                 st.write(round_item["content"])
 
+        # 底部：战报卡片（默认折叠）
         recommendation = session.get("recommendation")
         if recommendation:
-            st.markdown("---")
-            st.subheader("🏆 战报")
-            with st.container(border=True):
+            rc = recommendation
+            with st.expander(
+                f"🏆 战报：{rc['final_choice']}　（评分 {rc['score']}/10）", expanded=False
+            ):
                 col_a, col_b = st.columns([3, 1])
                 with col_a:
-                    st.markdown(f"### 🍽️ 最终推荐：{recommendation['final_choice']}")
-                    if recommendation.get("price"):
-                        st.caption(f"💰 {recommendation['price']} 元 · 来源：菜单")
-                    st.write(recommendation["reason"])
+                    st.markdown(f"### 🍽️ 最终推荐：{rc['final_choice']}")
+                    if rc.get("price"):
+                        st.caption(f"💰 {rc['price']} 元 · 来源：菜单")
+                    st.write(rc["reason"])
                 with col_b:
-                    st.metric("综合评分", f"{recommendation['score']}/10")
-                    st.markdown(f"**获胜方**：{recommendation.get('winner_agent', '—')}")
+                    st.metric("综合评分", f"{rc['score']}/10")
+                    st.markdown(f"**获胜方**：{rc.get('winner_agent', '—')}")
 
-                pros_cons = recommendation.get("pros_cons", {})
+                pros_cons = rc.get("pros_cons", {})
                 pc1, pc2 = st.columns(2)
                 with pc1:
                     st.markdown("**✅ 支持观点**")

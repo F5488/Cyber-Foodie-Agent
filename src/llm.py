@@ -21,6 +21,9 @@ import httpx
 # 使用 uvicorn.error 通道，保证日志出现在 uvicorn 启动终端
 logger = logging.getLogger("uvicorn.error")
 
+# 单次发言的最大 token 数（大厨发言为短文本，限制长度既提速又省费）
+MAX_TOKENS = 250
+
 
 class LLMError(RuntimeError):
     """LLM 调用失败时抛出。"""
@@ -174,6 +177,12 @@ class OpenAICompatibleClient(LLMClient):
                         {"role": "user", "content": user_prompt},
                     ],
                     "temperature": 0.7,
+                    # 大厨发言为短文本，限制长度避免冗长输出
+                    "max_tokens": MAX_TOKENS,
+                    # 关闭思考模式：DeepSeek 新模型默认开启 thinking，导致响应极慢；
+                    # 不识别的 provider 会静默忽略该参数。
+                    # 注意：不要同时传 reasoning_effort，二者冲突。
+                    "thinking": {"type": "disabled"},
                 },
             )
         except LLMError as exc:
