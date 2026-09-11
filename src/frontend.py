@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 
 import httpx
 import streamlit as st
@@ -66,6 +67,63 @@ def _load_agents() -> list[dict]:
     return []
 
 
+def _render_chat(session: dict) -> None:
+    """渲染聊天式发言记录（可复用，轮询期间反复调用）。"""
+    agents_list = session.get("agents", [])
+    agent_by_id = {a.get("agent_id"): a for a in agents_list}
+    for round_item in session.get("rounds", []):
+        agent = agent_by_id.get(round_item["speaker_id"], {})
+        avatar = agent.get("avatar", "👨‍🍳")
+        with st.chat_message(name=round_item["speaker_name"], avatar=avatar):
+            st.caption(f"第 {round_item['round_number']} 轮")
+            st.write(round_item["content"])
+
+
+def _render_recommendation(rc: dict | None) -> None:
+    """渲染战报卡片（默认折叠）。"""
+    if not rc:
+        return
+    with st.expander(
+        f"🏆 战报：{rc['final_choice']}　（评分 {rc['score']}/10）", expanded=False
+    ):
+        col_a, col_b = st.columns([3, 1])
+        with col_a:
+            st.markdown(f"### 🍽️ 最终推荐：{rc['final_choice']}")
+            if rc.get("price"):
+                st.caption(f"💰 {rc['price']} 元 · 来源：菜单")
+            st.write(rc["reason"])
+        with col_b:
+            st.metric("综合评分", f"{rc['score']}/10")
+            st.markdown(f"**获胜方**：{rc.get('winner_agent', '—')}")
+
+        pros_cons = rc.get("pros_cons", {})
+        pc1, pc2 = st.columns(2)
+        with pc1:
+            st.markdown("**✅ 支持观点**")
+            for p in pros_cons.get("pros", []):
+                st.markdown(f"- {p}")
+        with pc2:
+            st.markdown("**⚠️ 反对观点**")
+            for c in pros_cons.get("cons", []):
+                st.markdown(f"- {c}")
+
+
+def _poll_until_complete(session_id: str, placeholder, max_wait: int = 120) -> dict | None:
+    """轮询会话状态直到完成，实时刷新聊天区。返回最终会话或 None（超时）。"""
+    last = None
+    for _ in range(max_wait):
+        resp = _get(f"/api/debate/{session_id}/status")
+        if resp is not None and resp.status_code == 200:
+            last = resp.json()
+            with placeholder.container():
+                st.info("⏳ 大厨正在辩论中……")
+                _render_chat(last)
+            if last.get("is_complete") or last.get("status") in ("SUCCESS", "FAILED"):
+                return last
+        time.sleep(1)
+    return None if last is None or not last.get("is_complete") else last
+
+
 # ---------------------------------------------------------------------------
 # 页面：辩论
 # ---------------------------------------------------------------------------
@@ -109,13 +167,26 @@ def render_debate_page() -> None:
             "agent_a_id": agent_options[agent_a_label],
             "agent_b_id": agent_options[agent_b_label],
         }
-        resp = _post("/api/debate/start", payload)
+        # 异步启动：立即拿到 session_id，然后轮询实时展示
+        resp = _post("/api/debate/start-async", payload, timeout=15.0)
         if resp is None:
             st.error("无法连接后端，请先启动 FastAPI 服务（uvicorn src.main:app）。")
         elif resp.status_code >= 400:
             st.error(f"请求失败（{resp.status_code}）：{resp.text}")
         else:
-            st.session_state["session"] = resp.json()
+            session_id = resp.json()["session_id"]
+            st.markdown(
+                f"🍽️ **口味**：{taste}　💰 **预算**：{budget}　☁️ **天气**：{weather}"
+            )
+            placeholder = st.empty()
+            final = _poll_until_complete(session_id, placeholder)
+            if final is None:
+                st.warning("辩论超时，请重试")
+            else:
+                placeholder.empty()
+                _render_chat(final)
+                _render_recommendation(final.get("recommendation"))
+            return
 
     session = st.session_state.get("session")
     if session:
@@ -127,43 +198,10 @@ def render_debate_page() -> None:
         )
         st.caption(f"会话 `{session['session_id']}` · 状态 {session['status']}")
 
-        # 聊天式发言记录（st.chat_message 按说话人区分头像）
-        agents_list = session.get("agents", [])
-        agent_by_id = {a.get("agent_id"): a for a in agents_list}
-        for round_item in session.get("rounds", []):
-            agent = agent_by_id.get(round_item["speaker_id"], {})
-            avatar = agent.get("avatar", "👨‍🍳")
-            with st.chat_message(name=round_item["speaker_name"], avatar=avatar):
-                st.caption(f"第 {round_item['round_number']} 轮")
-                st.write(round_item["content"])
+        _render_chat(session)
 
         # 底部：战报卡片（默认折叠）
-        recommendation = session.get("recommendation")
-        if recommendation:
-            rc = recommendation
-            with st.expander(
-                f"🏆 战报：{rc['final_choice']}　（评分 {rc['score']}/10）", expanded=False
-            ):
-                col_a, col_b = st.columns([3, 1])
-                with col_a:
-                    st.markdown(f"### 🍽️ 最终推荐：{rc['final_choice']}")
-                    if rc.get("price"):
-                        st.caption(f"💰 {rc['price']} 元 · 来源：菜单")
-                    st.write(rc["reason"])
-                with col_b:
-                    st.metric("综合评分", f"{rc['score']}/10")
-                    st.markdown(f"**获胜方**：{rc.get('winner_agent', '—')}")
-
-                pros_cons = rc.get("pros_cons", {})
-                pc1, pc2 = st.columns(2)
-                with pc1:
-                    st.markdown("**✅ 支持观点**")
-                    for p in pros_cons.get("pros", []):
-                        st.markdown(f"- {p}")
-                with pc2:
-                    st.markdown("**⚠️ 反对观点**")
-                    for c in pros_cons.get("cons", []):
-                        st.markdown(f"- {c}")
+        _render_recommendation(session.get("recommendation"))
 
 
 # ---------------------------------------------------------------------------
@@ -440,8 +478,6 @@ with st.sidebar:
 
     st.divider()
     if st.button("🔧 测试后端连接", use_container_width=True):
-        import time
-
         url = f"{API_BASE}/health"
         start = time.time()
         try:

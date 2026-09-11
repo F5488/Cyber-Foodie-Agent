@@ -4,6 +4,7 @@ Sprint 2：内存字典替换为 SQLAlchemy 读写，服务重启后可查询历
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 from typing import Optional
@@ -36,6 +37,8 @@ from .orm_models import (
     SessionModel,
 )
 from .report import generate_report
+
+logger = logging.getLogger("uvicorn.error")
 
 # 允许的轮次上限，防御异常输入
 MAX_ROUNDS = 10
@@ -85,7 +88,16 @@ class DebateService:
     # 对外接口
     # ------------------------------------------------------------------
     def start_debate(self, req: DebateStartRequest) -> Session:
-        """创建会话、持久化并立即执行辩论，返回完整 Pydantic 会话。"""
+        """创建会话并同步执行完整辩论，返回完整 Pydantic 会话（供 API/测试/评测）。"""
+        session_id = self.create_session(req)
+        self.run_debate(session_id, req)
+        return self.get_status(session_id)
+
+    def create_session(self, req: DebateStartRequest) -> str:
+        """仅创建会话（status=RUNNING）并返回 session_id，不执行辩论。
+
+        供异步模式使用：先返回 session_id，再由后台任务跑辩论。
+        """
         with self._session_factory() as dbs:
             self._seed_agents(dbs)
             agents = self._load_selected_agents(dbs, req)
@@ -99,11 +111,29 @@ class DebateService:
                 agent_b_id=agents[1].agent_id,
             )
             dbs.add(session)
-            dbs.flush()  # 触发 session_id 生成
-
-            self._run_debate(dbs, session, agents, req)
             dbs.commit()
-            return self._orm_to_pydantic(dbs, session)
+            return session.session_id
+
+    def run_debate(self, session_id: str, req: DebateStartRequest) -> None:
+        """执行某个已存在会话的辩论循环（供后台任务调用）。"""
+        try:
+            with self._session_factory() as dbs:
+                session = dbs.get(SessionModel, session_id)
+                if session is None:
+                    return
+                agents = [
+                    dbs.get(AgentModel, aid)
+                    for aid in (session.agent_a_id, session.agent_b_id)
+                ]
+                self._run_debate(dbs, session, agents, req)
+                dbs.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("辩论执行失败 session=%s: %s", session_id, exc)
+            with self._session_factory() as dbs:
+                session = dbs.get(SessionModel, session_id)
+                if session is not None:
+                    session.status = SessionStatus.FAILED.value
+                    dbs.commit()
 
     def get_status(self, session_id: str) -> Optional[Session]:
         """按 session_id 从数据库查询会话。"""
@@ -191,7 +221,7 @@ class DebateService:
         agents: list[AgentModel],
         req: DebateStartRequest,
     ) -> None:
-        """轮流调用两位大厨，交替 N 轮，每轮发言即时落库。"""
+        """轮流调用两位大厨，交替 N 轮；每轮结束后提交，供前端轮询实时查看。"""
         context = _build_context_prompt(req)
         pydantic_rounds: list[DebateRound] = []
         for round_no in range(1, self._rounds + 1):
@@ -212,7 +242,6 @@ class DebateService:
                         content=content,
                     )
                 )
-                dbs.flush()
                 pydantic_rounds.append(
                     DebateRound(
                         session_id=session.session_id,
@@ -222,7 +251,9 @@ class DebateService:
                         content=content,
                     )
                 )
-        session.current_round = self._rounds
+            # 每完成一轮即提交，前端轮询可看到逐条冒出的发言
+            session.current_round = round_no
+            dbs.commit()
         session.status = SessionStatus.SUCCESS.value
 
         # 辩论结束，生成结构化战报并持久化（US03 + US05）

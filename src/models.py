@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator
 
 
 def _now_utc() -> datetime:
@@ -200,6 +200,12 @@ class Session(BaseModel):
     rounds: list[DebateRound] = Field(default_factory=list)
     recommendation: Optional[Recommendation] = None
     created_at: datetime = Field(default_factory=_now_utc)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def is_complete(self) -> bool:
+        """辩论是否已结束（随响应序列化，供前端轮询判断）。"""
+        return self.status in (SessionStatus.SUCCESS, SessionStatus.FAILED)
 
 
 class Menu(BaseModel):

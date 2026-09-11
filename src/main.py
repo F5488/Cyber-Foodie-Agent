@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -46,6 +46,7 @@ from .models import (  # noqa: E402
     PromptGenerateRequest,
     PromptGenerateResponse,
     Session,
+    SessionStatus,
 )
 
 logger = logging.getLogger("uvicorn.error")
@@ -165,7 +166,7 @@ def generate_agent_prompt(req: PromptGenerateRequest) -> PromptGenerateResponse:
 @app.post("/api/debate/start", response_model=Session, status_code=201)
 @limiter.limit("5/minute")
 def start_debate(req: DebateStartRequest, request: Request) -> Session:
-    """启动辩论（US01），每 IP 每分钟限 5 次。"""
+    """启动辩论（US01），同步跑完并返回完整会话，每 IP 每分钟限 5 次。"""
     try:
         session = service.start_debate(req)
     except ValueError as exc:
@@ -174,6 +175,24 @@ def start_debate(req: DebateStartRequest, request: Request) -> Session:
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"辩论执行失败: {exc}") from exc
     return session
+
+
+@app.post("/api/debate/start-async", status_code=202)
+@limiter.limit("5/minute")
+def start_debate_async(
+    req: DebateStartRequest, request: Request, background_tasks: BackgroundTasks
+) -> dict:
+    """异步启动辩论：立即返回 session_id（202），后台跑辩论循环。
+
+    前端可轮询 GET /api/debate/{session_id}/status 实时查看发言逐条出现。
+    """
+    try:
+        session_id = service.create_session(req)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    background_tasks.add_task(service.run_debate, session_id, req)
+    return {"session_id": session_id, "status": SessionStatus.RUNNING.value, "is_complete": False}
 
 
 @app.get("/api/debate/{session_id}/status", response_model=Session)
